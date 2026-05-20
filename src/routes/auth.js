@@ -2,7 +2,7 @@ const express = require('express');
 const crypto = require('crypto');
 const router = express.Router();
 const config = require('../config');
-const redis = require('../services/redis');
+const store = require('../services/store');
 const { sendVerificationEmail } = require('../services/email');
 
 function hashCode(code) {
@@ -12,8 +12,7 @@ function hashCode(code) {
     .digest('hex');
 }
 
-function redisKey(type, email) {
-  // Normalize email to prevent key collisions
+function storeKey(type, email) {
   return `2fa:${type}:${email.toLowerCase().trim()}`;
 }
 
@@ -27,28 +26,26 @@ router.post('/send-code', async (req, res, next) => {
       return res.status(400).json({ error: 'Valid email required' });
     }
 
-    const sendKey = redisKey('sends', email);
-    const sends = await redis.incr(sendKey);
-    if (sends === 1) await redis.expire(sendKey, config.code.sendWindowSeconds);
+    const sendKey = storeKey('sends', email);
+    const sends = store.incr(sendKey);
+    if (sends === 1) store.expire(sendKey, config.code.sendWindowSeconds);
 
     if (sends > config.code.maxSendAttempts) {
-      const ttl = await redis.ttl(sendKey);
+      const remaining = store.ttl(sendKey);
       return res.status(429).json({
         error: 'Too many code requests. Please wait before requesting a new code.',
-        retryAfterSeconds: ttl,
+        retryAfterSeconds: remaining,
       });
     }
 
     const code = crypto.randomInt(100000, 1000000).toString();
     const hashed = hashCode(code);
 
-    const codeKey = redisKey('code', email);
-    const attemptsKey = redisKey('attempts', email);
+    const codeKey = storeKey('code', email);
+    const attemptsKey = storeKey('attempts', email);
 
-    const pipeline = redis.pipeline();
-    pipeline.set(codeKey, hashed, 'EX', config.code.ttlSeconds);
-    pipeline.del(attemptsKey);
-    await pipeline.exec();
+    store.set(codeKey, hashed, config.code.ttlSeconds);
+    store.del(attemptsKey);
 
     await sendVerificationEmail(email, name, code);
 
@@ -71,11 +68,11 @@ router.post('/verify-code', async (req, res, next) => {
       return res.status(400).json({ error: 'Code must be a 6-digit number' });
     }
 
-    const codeKey = redisKey('code', email);
-    const attemptsKey = redisKey('attempts', email);
+    const codeKey = storeKey('code', email);
+    const attemptsKey = storeKey('attempts', email);
 
-    const attempts = await redis.incr(attemptsKey);
-    if (attempts === 1) await redis.expire(attemptsKey, config.code.sendWindowSeconds);
+    const attempts = store.incr(attemptsKey);
+    if (attempts === 1) store.expire(attemptsKey, config.code.sendWindowSeconds);
 
     if (attempts > config.code.maxVerifyAttempts) {
       return res.status(429).json({
@@ -84,7 +81,7 @@ router.post('/verify-code', async (req, res, next) => {
       });
     }
 
-    const stored = await redis.get(codeKey);
+    const stored = store.get(codeKey);
 
     if (!stored) {
       return res.status(404).json({ valid: false, error: 'No active code found. Please request a new one.' });
@@ -98,7 +95,7 @@ router.post('/verify-code', async (req, res, next) => {
       return res.status(200).json({ valid: false, attemptsRemaining: remaining });
     }
 
-    await redis.del(codeKey, attemptsKey);
+    store.del(codeKey, attemptsKey);
 
     res.json({ valid: true });
   } catch (err) {

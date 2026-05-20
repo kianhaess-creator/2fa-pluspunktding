@@ -10,9 +10,6 @@ module.exports = {
   port: process.env.PORT || 3000,
   apiKey: required('API_KEY'),
   allowedOrigins: (process.env.ALLOWED_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean),
-  redis: {
-    url: process.env.REDIS_URL || 'redis://localhost:6379',
-  },
   brevo: {
     smtpLogin: required('BREVO_SMTP_LOGIN'),
     smtpKey: required('BREVO_SMTP_KEY'),
