@@ -1,23 +1,28 @@
-const nodemailer = require('nodemailer');
 const config = require('../config');
 
-const transporter = nodemailer.createTransport({
-  host: 'smtp-relay.brevo.com',
-  port: 587,
-  secure: false,
-  auth: {
-    user: config.brevo.smtpLogin,
-    pass: config.brevo.smtpKey,
-  },
-});
-
 async function sendVerificationEmail(toEmail, toName, code) {
-  await transporter.sendMail({
-    from: `"${config.brevo.senderName}" <${config.brevo.senderEmail}>`,
-    to: toName ? `"${toName}" <${toEmail}>` : toEmail,
-    subject: 'Dein Verifizierungscode',
-    html: buildEmailHtml(code),
+  const response = await fetch('https://api.brevo.com/v3/smtp/email', {
+    method: 'POST',
+    headers: {
+      'accept': 'application/json',
+      'api-key': config.brevo.apiKey,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      sender: {
+        name: config.brevo.senderName,
+        email: config.brevo.senderEmail,
+      },
+      to: [{ email: toEmail, name: toName || toEmail }],
+      subject: 'Dein Verifizierungscode',
+      htmlContent: buildEmailHtml(code),
+    }),
   });
+
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Brevo API error ${response.status}: ${body}`);
+  }
 }
 
 function buildEmailHtml(code) {

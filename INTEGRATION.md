@@ -12,7 +12,7 @@ Google- und Apple-Login überspringen die 2FA komplett.
 
 Der 2FA-Service muss deployed und erreichbar sein. Trage die URL und den API Key hier ein:
 
-- **Service URL:** `https://DEINE-SERVICE-URL` *(z.B. https://2fa.pluspunkt.online)*
+- **Service URL:** `https://twofa-pluspunktding.onrender.com`
 - **API Key:** `c12f48f7b74becf2bac9ee8b62a7bc131b295fb0f06490f052a61678c969015e`
 
 ---
@@ -214,7 +214,7 @@ Passe `SERVICE_URL` und `API_KEY` an.
   </div>
 
   <script>
-    const SERVICE_URL = 'https://DEINE-SERVICE-URL'; // ← hier deine Service-URL eintragen
+    const SERVICE_URL = 'https://twofa-pluspunktding.onrender.com';
     const API_KEY = 'c12f48f7b74becf2bac9ee8b62a7bc131b295fb0f06490f052a61678c969015e';
     const REDIRECT_URL = '/dashboard.html'; // ← hier deine Zielseite nach erfolgreichem Login
 

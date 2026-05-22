@@ -11,8 +11,7 @@ module.exports = {
   apiKey: required('API_KEY'),
   allowedOrigins: (process.env.ALLOWED_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean),
   brevo: {
-    smtpLogin: required('BREVO_SMTP_LOGIN'),
-    smtpKey: required('BREVO_SMTP_KEY'),
+    apiKey: required('BREVO_API_KEY'),
     senderEmail: required('SENDER_EMAIL'),
     senderName: process.env.SENDER_NAME || 'Verification',
   },
