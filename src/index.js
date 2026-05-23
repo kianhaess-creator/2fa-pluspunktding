@@ -39,7 +39,7 @@ app.use((err, _req, res, _next) => {
 init()
   .then(() => {
     app.listen(config.port, () => {
-      console.log(`2FA service running on port ${config.port}`);
+      console.log(`2FA service running on port ${config.port} ✓`);
     });
   })
   .catch((err) => {
