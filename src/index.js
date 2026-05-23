@@ -32,6 +32,9 @@ apiRouter.use('/', authRoutes);
 apiRouter.use('/auth', userRoutes);
 app.use('/api', apiRouter);
 
+// Direct auth routes as fallback
+app.use('/api/auth', requireApiKey, userRoutes);
+
 app.get('/health', (_req, res) => res.json({ status: 'ok' }));
 
 app.use((_req, res) => res.status(404).json({ error: 'Not found' }));
