@@ -4,6 +4,8 @@ const rateLimit = require('express-rate-limit');
 const config = require('./config');
 const requireApiKey = require('./middleware/apiKey');
 const authRoutes = require('./routes/auth');
+const userRoutes = require('./routes/users');
+const { init } = require('./services/db');
 
 const app = express();
 
@@ -26,6 +28,7 @@ app.use(rateLimit({
 // All routes require a valid API key
 app.use('/api', requireApiKey);
 app.use('/api', authRoutes);
+app.use('/api/auth', userRoutes);
 
 app.get('/health', (_req, res) => res.json({ status: 'ok' }));
 
@@ -36,6 +39,13 @@ app.use((err, _req, res, _next) => {
   res.status(500).json({ error: 'Internal server error' });
 });
 
-app.listen(config.port, () => {
-  console.log(`2FA service running on port ${config.port}`);
-});
+init()
+  .then(() => {
+    app.listen(config.port, () => {
+      console.log(`2FA service running on port ${config.port}`);
+    });
+  })
+  .catch((err) => {
+    console.error('DB init failed:', err.message);
+    process.exit(1);
+  });
