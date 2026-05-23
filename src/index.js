@@ -26,9 +26,11 @@ app.use(rateLimit({
 }));
 
 // All routes require a valid API key
-app.use('/api', requireApiKey);
-app.use('/api', authRoutes);
-app.use('/api/auth', userRoutes);
+const apiRouter = express.Router();
+apiRouter.use(requireApiKey);
+apiRouter.use('/', authRoutes);
+apiRouter.use('/auth', userRoutes);
+app.use('/api', apiRouter);
 
 app.get('/health', (_req, res) => res.json({ status: 'ok' }));
 
