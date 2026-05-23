@@ -4,7 +4,6 @@ const rateLimit = require('express-rate-limit');
 const config = require('./config');
 const requireApiKey = require('./middleware/apiKey');
 const authRoutes = require('./routes/auth');
-const userRoutes = require('./routes/users');
 const { init } = require('./services/db');
 
 const app = express();
@@ -25,15 +24,8 @@ app.use(rateLimit({
   message: { error: 'Too many requests' },
 }));
 
-// All routes require a valid API key
-const apiRouter = express.Router();
-apiRouter.use(requireApiKey);
-apiRouter.use('/', authRoutes);
-apiRouter.use('/auth', userRoutes);
-app.use('/api', apiRouter);
-
-// Direct auth routes as fallback
-app.use('/api/auth', requireApiKey, userRoutes);
+app.use('/api', requireApiKey);
+app.use('/api', authRoutes);
 
 app.get('/health', (_req, res) => res.json({ status: 'ok' }));
 
