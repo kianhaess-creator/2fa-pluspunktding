@@ -10,7 +10,7 @@ const app = express();
 
 app.use(cors({
   origin: config.allowedOrigins.length > 0 ? config.allowedOrigins : false,
-  methods: ['POST'],
+  methods: ['GET', 'POST'],
 }));
 
 app.use(express.json({ limit: '10kb' }));

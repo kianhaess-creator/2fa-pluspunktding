@@ -110,7 +110,7 @@ router.post('/verify-code', async (req, res, next) => {
 // POST /api/auth/register
 router.post('/auth/register', async (req, res, next) => {
   try {
-    const { email, password } = req.body;
+    const { email, password, name, postalCode, city, birthDate } = req.body;
     if (!email || typeof email !== 'string' || !email.includes('@') ||
         !password || typeof password !== 'string' || password.length < 6) {
       return res.status(400).json({ error: 'invalid_data' });
@@ -119,7 +119,11 @@ router.post('/auth/register', async (req, res, next) => {
     const existing = await pool.query('SELECT email FROM users WHERE email = $1', [normalized]);
     if (existing.rows.length > 0) return res.status(409).json({ error: 'email_taken' });
     const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
-    await pool.query('INSERT INTO users (email, password_hash) VALUES ($1, $2)', [normalized, passwordHash]);
+    await pool.query(
+      `INSERT INTO users (email, password_hash, name, postal_code, city, birth_date)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [normalized, passwordHash, name || null, postalCode || null, city || null, birthDate || null]
+    );
     res.json({ success: true });
   } catch (err) { next(err); }
 });
@@ -138,6 +142,58 @@ router.post('/auth/login', async (req, res, next) => {
     const match = await bcrypt.compare(password, hash);
     if (!match || !user) return res.status(200).json({ success: false });
     res.json({ success: true });
+  } catch (err) { next(err); }
+});
+
+// POST /api/auth/profile
+router.post('/auth/profile', async (req, res, next) => {
+  try {
+    const { email, name, postalCode, city, birthDate, loginCount, lastLoginAt, loginMethod } = req.body;
+    if (!email || typeof email !== 'string' || !email.includes('@')) {
+      return res.status(400).json({ error: 'invalid_data' });
+    }
+    const normalized = email.toLowerCase().trim();
+    await pool.query(
+      `UPDATE users SET
+        name = COALESCE($2, name),
+        postal_code = COALESCE($3, postal_code),
+        city = COALESCE($4, city),
+        birth_date = COALESCE($5, birth_date),
+        login_count = COALESCE($6, login_count),
+        last_login_at = COALESCE($7, last_login_at),
+        login_method = COALESCE($8, login_method)
+       WHERE email = $1`,
+      [normalized, name ?? null, postalCode ?? null, city ?? null, birthDate ?? null,
+       loginCount ?? null, lastLoginAt ?? null, loginMethod ?? null]
+    );
+    res.json({ success: true });
+  } catch (err) { next(err); }
+});
+
+// GET /api/auth/profile?email=...
+router.get('/auth/profile', async (req, res, next) => {
+  try {
+    const email = req.query.email;
+    if (!email || typeof email !== 'string' || !email.includes('@')) {
+      return res.status(400).json({ error: 'invalid_data' });
+    }
+    const normalized = email.toLowerCase().trim();
+    const result = await pool.query(
+      `SELECT name, postal_code, city, birth_date, login_count, last_login_at, login_method
+       FROM users WHERE email = $1`,
+      [normalized]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'not_found' });
+    const r = result.rows[0];
+    res.json({
+      name: r.name,
+      postalCode: r.postal_code,
+      city: r.city,
+      birthDate: r.birth_date,
+      loginCount: r.login_count,
+      lastLoginAt: r.last_login_at,
+      loginMethod: r.login_method,
+    });
   } catch (err) { next(err); }
 });
 
