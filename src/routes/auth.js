@@ -22,8 +22,6 @@ function storeKey(type, email) {
   return `2fa:${type}:${email.toLowerCase().trim()}`;
 }
 
-// POST /api/send-code
-// Body: { email, name? }
 router.post('/send-code', async (req, res, next) => {
   try {
     const { email, name } = req.body;
@@ -61,8 +59,6 @@ router.post('/send-code', async (req, res, next) => {
   }
 });
 
-// POST /api/verify-code
-// Body: { email, code }
 router.post('/verify-code', async (req, res, next) => {
   try {
     const { email, code } = req.body;
@@ -115,7 +111,6 @@ router.post('/verify-code', async (req, res, next) => {
   }
 });
 
-// POST /api/auth/register
 router.post('/auth/register', async (req, res, next) => {
   try {
     const { email, password, name, postalCode, city, birthDate } = req.body;
@@ -136,7 +131,6 @@ router.post('/auth/register', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-// POST /api/auth/login
 router.post('/auth/login', async (req, res, next) => {
   try {
     const { email, password } = req.body;
@@ -153,15 +147,10 @@ router.post('/auth/login', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-// POST /api/auth/profile  (requires JWT)
 router.post('/auth/profile', requireJwt, async (req, res, next) => {
   try {
     const email = req.user.email;
     const { name, postalCode, city, birthDate, loginCount, lastLoginAt, loginMethod } = req.body;
-    if (!email || typeof email !== 'string' || !email.includes('@')) {
-      return res.status(400).json({ error: 'invalid_data' });
-    }
-    const normalized = email;
     await pool.query(
       `UPDATE users SET
         name = COALESCE($2, name),
@@ -172,14 +161,13 @@ router.post('/auth/profile', requireJwt, async (req, res, next) => {
         last_login_at = COALESCE($7, last_login_at),
         login_method = COALESCE($8, login_method)
        WHERE email = $1`,
-      [normalized, name ?? null, postalCode ?? null, city ?? null, birthDate ?? null,
+      [email, name ?? null, postalCode ?? null, city ?? null, birthDate ?? null,
        loginCount ?? null, lastLoginAt ?? null, loginMethod ?? null]
     );
     res.json({ success: true });
   } catch (err) { next(err); }
 });
 
-// GET /api/auth/profile  (requires JWT)
 router.get('/auth/profile', requireJwt, async (req, res, next) => {
   try {
     const normalized = req.user.email;
@@ -202,7 +190,6 @@ router.get('/auth/profile', requireJwt, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-// POST /api/auth/reset-password
 router.post('/auth/reset-password', async (req, res, next) => {
   try {
     const { email, newPassword } = req.body;

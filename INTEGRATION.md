@@ -390,6 +390,8 @@ Passe `SERVICE_URL` und `API_KEY` an.
         });
         const data = await res.json();
         if (data.valid) {
+          sessionStorage.setItem('auth_token', data.token);
+          sessionStorage.setItem('auth_email', email);
           sessionStorage.removeItem('2fa_email');
           sessionStorage.removeItem('2fa_name');
           window.location.href = REDIRECT_URL;
@@ -492,7 +494,7 @@ Antwort: `{ "success": true, "message": "Verification code sent." }`
 ```json
 { "email": "user@example.com", "code": "123456" }
 ```
-Antwort bei Erfolg: `{ "valid": true }`  
+Antwort bei Erfolg: `{ "valid": true, "token": "eyJ..." }` ← JWT Token  
 Antwort bei Fehler: `{ "valid": false, "attemptsRemaining": 4 }`
 
 ---

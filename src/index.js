@@ -15,7 +15,6 @@ app.use(cors({
 
 app.use(express.json({ limit: '10kb' }));
 
-// Global rate limit: max 60 requests per minute per IP
 app.use(rateLimit({
   windowMs: 60 * 1000,
   max: 60,
