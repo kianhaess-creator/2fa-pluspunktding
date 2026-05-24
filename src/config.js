@@ -22,4 +22,6 @@ module.exports = {
     sendWindowSeconds: 15 * 60,
   },
   hashPepper: required('CODE_HASH_PEPPER'),
+  jwtSecret: required('JWT_SECRET'),
+  jwtExpiresIn: '24h',
 };

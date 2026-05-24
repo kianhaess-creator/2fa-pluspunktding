@@ -1,11 +1,13 @@
 const express = require('express');
 const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
 const router = express.Router();
 const config = require('../config');
 const store = require('../services/store');
 const { sendVerificationEmail } = require('../services/email');
 const { pool } = require('../services/db');
+const requireJwt = require('../middleware/jwt');
 
 const SALT_ROUNDS = 12;
 
@@ -101,7 +103,13 @@ router.post('/verify-code', async (req, res, next) => {
 
     store.del(codeKey, attemptsKey);
 
-    res.json({ valid: true });
+    const token = jwt.sign(
+      { email: email.toLowerCase().trim() },
+      config.jwtSecret,
+      { expiresIn: config.jwtExpiresIn }
+    );
+
+    res.json({ valid: true, token });
   } catch (err) {
     next(err);
   }
@@ -145,14 +153,15 @@ router.post('/auth/login', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-// POST /api/auth/profile
-router.post('/auth/profile', async (req, res, next) => {
+// POST /api/auth/profile  (requires JWT)
+router.post('/auth/profile', requireJwt, async (req, res, next) => {
   try {
-    const { email, name, postalCode, city, birthDate, loginCount, lastLoginAt, loginMethod } = req.body;
+    const email = req.user.email;
+    const { name, postalCode, city, birthDate, loginCount, lastLoginAt, loginMethod } = req.body;
     if (!email || typeof email !== 'string' || !email.includes('@')) {
       return res.status(400).json({ error: 'invalid_data' });
     }
-    const normalized = email.toLowerCase().trim();
+    const normalized = email;
     await pool.query(
       `UPDATE users SET
         name = COALESCE($2, name),
@@ -170,14 +179,10 @@ router.post('/auth/profile', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-// GET /api/auth/profile?email=...
-router.get('/auth/profile', async (req, res, next) => {
+// GET /api/auth/profile  (requires JWT)
+router.get('/auth/profile', requireJwt, async (req, res, next) => {
   try {
-    const email = req.query.email;
-    if (!email || typeof email !== 'string' || !email.includes('@')) {
-      return res.status(400).json({ error: 'invalid_data' });
-    }
-    const normalized = email.toLowerCase().trim();
+    const normalized = req.user.email;
     const result = await pool.query(
       `SELECT name, postal_code, city, birth_date, login_count, last_login_at, login_method
        FROM users WHERE email = $1`,
