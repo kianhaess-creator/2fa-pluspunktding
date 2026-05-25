@@ -1,5 +1,6 @@
 const express = require('express');
 const crypto = require('crypto');
+const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const rateLimit = require('express-rate-limit');
 const router = express.Router();
@@ -7,6 +8,9 @@ const config = require('../config');
 const store = require('../services/store');
 const { sendVerificationEmail } = require('../services/email');
 const { pool } = require('../services/db');
+
+const SALT_ROUNDS = 12;
+const DUMMY_HASH = '$2a$12$invalidhashinvalidhashinvalidhashinvalidhashinvalid';
 
 const loginLimiter = rateLimit({
   windowMs: 60 * 1000,
@@ -23,8 +27,6 @@ const codeLimiter = rateLimit({
   legacyHeaders: false,
   message: { success: false, message: 'Zu viele Versuche. Bitte warte eine Minute.' },
 });
-
-const DUMMY_HASH = '0'.repeat(64);
 
 function sha256(value) {
   return crypto.createHash('sha256').update(value).digest('hex');
@@ -71,7 +73,7 @@ router.post('/business/login', loginLimiter, async (req, res, next) => {
     const business = result.rows[0];
 
     const hash = business ? business.password_hash : DUMMY_HASH;
-    const matches = safeCompare(sha256(password), hash);
+    const matches = await bcrypt.compare(password, hash);
 
     if (!business || !matches) return res.json({ success: false, message: 'Ungültige Zugangsdaten' });
 
@@ -142,7 +144,7 @@ router.post('/employee/login', loginLimiter, async (req, res, next) => {
     const employee = result.rows[0];
 
     const hash = employee ? employee.password_hash : DUMMY_HASH;
-    const matches = safeCompare(sha256(password), hash);
+    const matches = await bcrypt.compare(password, hash);
 
     if (!employee || !matches) return res.json({ success: false, message: 'Ungültige Zugangsdaten' });
 
@@ -254,6 +256,7 @@ router.post('/business/register-employee', async (req, res, next) => {
     const existing = await pool.query('SELECT id FROM business_employees WHERE email = $1', [normalized]);
     if (existing.rows.length > 0) return res.status(409).json({ error: 'email_taken' });
 
+    const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
     const result = await pool.query(
       `INSERT INTO business_employees
        (email, password_hash, first_name, last_name, role, business_email,
@@ -261,7 +264,7 @@ router.post('/business/register-employee', async (req, res, next) => {
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, true)
        RETURNING id`,
       [
-        normalized, sha256(password), first_name, last_name,
+        normalized, passwordHash, first_name, last_name,
         role || null, user.email,
         workdays || null, shift_from || null, shift_to || null,
         permissions ? JSON.stringify(permissions) : null,
