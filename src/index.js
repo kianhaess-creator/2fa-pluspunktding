@@ -4,6 +4,7 @@ const rateLimit = require('express-rate-limit');
 const config = require('./config');
 const requireApiKey = require('./middleware/apiKey');
 const authRoutes = require('./routes/auth');
+const businessRoutes = require('./routes/business');
 const { init } = require('./services/db');
 
 const app = express();
@@ -25,6 +26,7 @@ app.use(rateLimit({
 
 app.use('/api', requireApiKey);
 app.use('/api', authRoutes);
+app.use('/api/auth', businessRoutes);
 
 app.get('/health', (_req, res) => res.json({ status: 'ok' }));
 
