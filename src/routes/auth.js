@@ -150,7 +150,7 @@ router.post('/auth/login', async (req, res, next) => {
 router.post('/auth/profile', requireJwt, async (req, res, next) => {
   try {
     const email = req.user.email;
-    const { name, postalCode, city, birthDate, loginCount, lastLoginAt, loginMethod } = req.body;
+    const { name, postalCode, city, birthDate, loginCount, lastLoginAt, loginMethod, street, plz } = req.body;
     await pool.query(
       `UPDATE users SET
         name = COALESCE($2, name),
@@ -159,10 +159,12 @@ router.post('/auth/profile', requireJwt, async (req, res, next) => {
         birth_date = COALESCE($5, birth_date),
         login_count = COALESCE($6, login_count),
         last_login_at = COALESCE($7, last_login_at),
-        login_method = COALESCE($8, login_method)
+        login_method = COALESCE($8, login_method),
+        street = COALESCE($9, street),
+        plz = COALESCE($10, plz)
        WHERE email = $1`,
       [email, name ?? null, postalCode ?? null, city ?? null, birthDate ?? null,
-       loginCount ?? null, lastLoginAt ?? null, loginMethod ?? null]
+       loginCount ?? null, lastLoginAt ?? null, loginMethod ?? null, street ?? null, plz ?? null]
     );
     res.json({ success: true });
   } catch (err) { next(err); }
@@ -172,7 +174,7 @@ router.get('/auth/profile', requireJwt, async (req, res, next) => {
   try {
     const normalized = req.user.email;
     const result = await pool.query(
-      `SELECT name, postal_code, city, birth_date, login_count, last_login_at, login_method
+      `SELECT name, postal_code, city, birth_date, login_count, last_login_at, login_method, street, plz
        FROM users WHERE email = $1`,
       [normalized]
     );
@@ -186,6 +188,8 @@ router.get('/auth/profile', requireJwt, async (req, res, next) => {
       loginCount: r.login_count,
       lastLoginAt: r.last_login_at,
       loginMethod: r.login_method,
+      street: r.street,
+      plz: r.plz,
     });
   } catch (err) { next(err); }
 });
