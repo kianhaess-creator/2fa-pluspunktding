@@ -276,4 +276,31 @@ router.post('/business/register-employee', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+router.post('/business/change-password', async (req, res, next) => {
+  try {
+    let user;
+    try { user = verifyToken(req); } catch (e) { return res.status(e.status).json({ error: e.message }); }
+    if (user.type !== 'business') return res.status(403).json({ error: 'Forbidden' });
+
+    const { current_password, new_password } = req.body;
+    if (!current_password || !new_password) {
+      return res.status(400).json({ success: false, message: 'Pflichtfelder fehlen.' });
+    }
+    if (typeof new_password !== 'string' || new_password.length < 8) {
+      return res.status(400).json({ success: false, message: 'Neues Passwort muss mindestens 8 Zeichen lang sein.' });
+    }
+
+    const result = await pool.query('SELECT password_hash FROM businesses WHERE email = $1', [user.email]);
+    if (result.rows.length === 0) return res.status(404).json({ success: false, message: 'Business nicht gefunden.' });
+
+    const match = await bcrypt.compare(current_password, result.rows[0].password_hash);
+    if (!match) return res.status(400).json({ success: false, message: 'Aktuelles Passwort ist falsch.' });
+
+    const newHash = await bcrypt.hash(new_password, SALT_ROUNDS);
+    await pool.query('UPDATE businesses SET password_hash = $1 WHERE email = $2', [newHash, user.email]);
+
+    res.json({ success: true });
+  } catch (err) { next(err); }
+});
+
 module.exports = router;
