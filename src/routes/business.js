@@ -16,8 +16,27 @@ const loginLimiter = rateLimit({
   message: { success: false, message: 'Zu viele Versuche. Bitte warte eine Minute.' },
 });
 
+const codeLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, message: 'Zu viele Versuche. Bitte warte eine Minute.' },
+});
+
+const DUMMY_HASH = '0'.repeat(64);
+
 function sha256(value) {
   return crypto.createHash('sha256').update(value).digest('hex');
+}
+
+function safeCompare(a, b) {
+  if (a.length !== b.length) return false;
+  try {
+    return crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b));
+  } catch {
+    return false;
+  }
 }
 
 function storeKey(type, email) {
@@ -38,6 +57,7 @@ function verifyToken(req) {
   }
 }
 
+// POST /api/auth/business/login
 router.post('/business/login', loginLimiter, async (req, res, next) => {
   try {
     const { email, password } = req.body;
@@ -50,15 +70,15 @@ router.post('/business/login', loginLimiter, async (req, res, next) => {
     );
     const business = result.rows[0];
 
-    const hash = business ? business.password_hash : '0'.repeat(64);
-    const inputHash = sha256(password);
-    const matches = crypto.timingSafeEqual(Buffer.from(inputHash), Buffer.from(hash));
+    const hash = business ? business.password_hash : DUMMY_HASH;
+    const matches = safeCompare(sha256(password), hash);
 
     if (!business || !matches) return res.json({ success: false, message: 'Ungültige Zugangsdaten' });
 
     if (business.two_fa_enabled) {
       const code = crypto.randomInt(100000, 1000000).toString();
       store.set(storeKey('code', normalized), sha256(code), config.code.ttlSeconds);
+      store.del(storeKey('code-attempts', normalized));
       await sendVerificationEmail(normalized, business.name, code);
       return res.json({ success: false, requires2fa: true });
     }
@@ -67,6 +87,48 @@ router.post('/business/login', loginLimiter, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// POST /api/auth/business/verify-2fa
+router.post('/business/verify-2fa', codeLimiter, async (req, res, next) => {
+  try {
+    const { email, code } = req.body;
+    if (!email || typeof email !== 'string' || !email.includes('@')) {
+      return res.status(400).json({ error: 'Valid email required' });
+    }
+    if (!code || !/^\d{6}$/.test(code)) {
+      return res.status(400).json({ error: 'Code must be a 6-digit number' });
+    }
+
+    const normalized = email.toLowerCase().trim();
+    const codeKey = storeKey('code', normalized);
+    const attemptsKey = storeKey('code-attempts', normalized);
+
+    const attempts = store.incr(attemptsKey);
+    if (attempts === 1) store.expire(attemptsKey, config.code.sendWindowSeconds);
+
+    if (attempts > config.code.maxVerifyAttempts) {
+      return res.status(429).json({ success: false, error: 'Too many failed attempts. Request a new code.' });
+    }
+
+    const stored = store.get(codeKey);
+    if (!stored) {
+      return res.status(404).json({ success: false, error: 'No active code found. Please request a new one.' });
+    }
+
+    if (!safeCompare(sha256(code), stored)) {
+      const remaining = config.code.maxVerifyAttempts - attempts;
+      return res.json({ success: false, attemptsRemaining: remaining });
+    }
+
+    store.del(codeKey, attemptsKey);
+
+    const businessResult = await pool.query('SELECT name FROM businesses WHERE email = $1', [normalized]);
+    if (businessResult.rows.length === 0) return res.json({ success: false, message: 'Ungültige Zugangsdaten' });
+
+    res.json({ success: true, token: signToken({ email: normalized, type: 'business' }) });
+  } catch (err) { next(err); }
+});
+
+// POST /api/auth/employee/login
 router.post('/employee/login', loginLimiter, async (req, res, next) => {
   try {
     const { email, password } = req.body;
@@ -79,9 +141,8 @@ router.post('/employee/login', loginLimiter, async (req, res, next) => {
     );
     const employee = result.rows[0];
 
-    const hash = employee ? employee.password_hash : '0'.repeat(64);
-    const inputHash = sha256(password);
-    const matches = crypto.timingSafeEqual(Buffer.from(inputHash), Buffer.from(hash));
+    const hash = employee ? employee.password_hash : DUMMY_HASH;
+    const matches = safeCompare(sha256(password), hash);
 
     if (!employee || !matches) return res.json({ success: false, message: 'Ungültige Zugangsdaten' });
 
@@ -102,7 +163,8 @@ router.post('/employee/login', loginLimiter, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-router.post('/employee/update-email', async (req, res, next) => {
+// POST /api/auth/employee/update-email
+router.post('/employee/update-email', codeLimiter, async (req, res, next) => {
   try {
     let user;
     try { user = verifyToken(req); } catch (e) { return res.status(e.status).json({ error: e.message }); }
@@ -120,7 +182,7 @@ router.post('/employee/update-email', async (req, res, next) => {
     const code = crypto.randomInt(100000, 1000000).toString();
     store.set(
       storeKey('email-change', user.email),
-      JSON.stringify({ hash: sha256(code), new_email: normalized }),
+      JSON.stringify({ hash: sha256(code), new_email: normalized, attempts: 0 }),
       config.code.ttlSeconds
     );
 
@@ -129,6 +191,7 @@ router.post('/employee/update-email', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// POST /api/auth/employee/verify-email
 router.post('/employee/verify-email', async (req, res, next) => {
   try {
     let user;
@@ -142,11 +205,17 @@ router.post('/employee/verify-email', async (req, res, next) => {
     const stored = store.get(codeKey);
     if (!stored) return res.status(404).json({ error: 'No active code. Request a new one.' });
 
-    const { hash, new_email: storedEmail } = JSON.parse(stored);
-    const inputHash = sha256(code);
-    const matches = crypto.timingSafeEqual(Buffer.from(inputHash), Buffer.from(hash));
+    const entry = JSON.parse(stored);
+    entry.attempts = (entry.attempts || 0) + 1;
 
-    if (!matches || storedEmail !== new_email?.toLowerCase().trim()) {
+    if (entry.attempts > config.code.maxVerifyAttempts) {
+      store.del(codeKey);
+      return res.status(429).json({ error: 'Too many failed attempts. Request a new code.' });
+    }
+
+    store.set(codeKey, JSON.stringify(entry), store.ttl(codeKey));
+
+    if (!safeCompare(sha256(code), entry.hash) || entry.new_email !== new_email?.toLowerCase().trim()) {
       return res.status(400).json({ error: 'Invalid or expired code' });
     }
 
@@ -154,20 +223,22 @@ router.post('/employee/verify-email', async (req, res, next) => {
 
     await pool.query(
       'UPDATE business_employees SET email = $1, is_first_login = false WHERE id = $2',
-      [storedEmail, user.employee_id]
+      [entry.new_email, user.employee_id]
     );
 
-    const token = signToken({
-      email: storedEmail,
-      type: 'employee',
-      business_email: user.business_email,
-      employee_id: user.employee_id,
+    res.json({
+      success: true,
+      token: signToken({
+        email: entry.new_email,
+        type: 'employee',
+        business_email: user.business_email,
+        employee_id: user.employee_id,
+      }),
     });
-
-    res.json({ success: true, token });
   } catch (err) { next(err); }
 });
 
+// POST /api/auth/business/register-employee
 router.post('/business/register-employee', async (req, res, next) => {
   try {
     let user;
@@ -175,7 +246,7 @@ router.post('/business/register-employee', async (req, res, next) => {
     if (user.type !== 'business') return res.status(403).json({ error: 'Forbidden' });
 
     const { first_name, last_name, email, password, role, workdays, shift_from, shift_to, permissions, photo_url } = req.body;
-    if (!email || !password || !first_name || !last_name) {
+    if (!email || !password || !first_name || !last_name || typeof password !== 'string' || password.length < 6) {
       return res.status(400).json({ error: 'invalid_data' });
     }
 
