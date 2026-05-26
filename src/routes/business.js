@@ -60,7 +60,7 @@ function verifyToken(req) {
 }
 
 // POST /api/auth/business/login
-router.post('/business/login', loginLimiter, async (req, res, next) => {
+router.post('/auth/business/login', loginLimiter, async (req, res, next) => {
   try {
     const { email, password } = req.body;
     if (!email || !password) return res.json({ success: false, message: 'Ungültige Zugangsdaten' });
@@ -90,7 +90,7 @@ router.post('/business/login', loginLimiter, async (req, res, next) => {
 });
 
 // POST /api/auth/business/verify-2fa
-router.post('/business/verify-2fa', codeLimiter, async (req, res, next) => {
+router.post('/auth/business/verify-2fa', codeLimiter, async (req, res, next) => {
   try {
     const { email, code } = req.body;
     if (!email || typeof email !== 'string' || !email.includes('@')) {
@@ -131,7 +131,7 @@ router.post('/business/verify-2fa', codeLimiter, async (req, res, next) => {
 });
 
 // POST /api/auth/employee/login
-router.post('/employee/login', loginLimiter, async (req, res, next) => {
+router.post('/auth/employee/login', loginLimiter, async (req, res, next) => {
   try {
     const { email, password } = req.body;
     if (!email || !password) return res.json({ success: false, message: 'Ungültige Zugangsdaten' });
@@ -166,7 +166,7 @@ router.post('/employee/login', loginLimiter, async (req, res, next) => {
 });
 
 // POST /api/auth/employee/update-email
-router.post('/employee/update-email', codeLimiter, async (req, res, next) => {
+router.post('/auth/employee/update-email', codeLimiter, async (req, res, next) => {
   try {
     let user;
     try { user = verifyToken(req); } catch (e) { return res.status(e.status).json({ error: e.message }); }
@@ -194,7 +194,7 @@ router.post('/employee/update-email', codeLimiter, async (req, res, next) => {
 });
 
 // POST /api/auth/employee/verify-email
-router.post('/employee/verify-email', async (req, res, next) => {
+router.post('/auth/employee/verify-email', async (req, res, next) => {
   try {
     let user;
     try { user = verifyToken(req); } catch (e) { return res.status(e.status).json({ error: e.message }); }
@@ -241,7 +241,7 @@ router.post('/employee/verify-email', async (req, res, next) => {
 });
 
 // POST /api/auth/business/register-employee
-router.post('/business/register-employee', async (req, res, next) => {
+router.post('/auth/business/register-employee', async (req, res, next) => {
   try {
     let user;
     try { user = verifyToken(req); } catch (e) { return res.status(e.status).json({ error: e.message }); }
@@ -276,7 +276,7 @@ router.post('/business/register-employee', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-router.post('/business/change-password', async (req, res, next) => {
+router.post('/auth/business/change-password', async (req, res, next) => {
   try {
     let user;
     try { user = verifyToken(req); } catch (e) { return res.status(e.status).json({ error: e.message }); }

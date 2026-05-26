@@ -25,8 +25,8 @@ app.use(rateLimit({
 }));
 
 app.use('/api', requireApiKey);
+app.use('/api', businessRoutes);
 app.use('/api', authRoutes);
-app.use('/api/auth', businessRoutes);
 
 app.get('/health', (_req, res) => res.json({ status: 'ok' }));
 
