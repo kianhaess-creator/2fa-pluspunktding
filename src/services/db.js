@@ -22,6 +22,24 @@ async function init() {
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS login_method TEXT DEFAULT 'email'`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS street TEXT`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS plz TEXT`);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS business_employees (
+      id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+      email TEXT UNIQUE NOT NULL,
+      password_hash TEXT NOT NULL,
+      first_name TEXT,
+      last_name TEXT,
+      role TEXT,
+      business_email TEXT NOT NULL,
+      workdays TEXT[],
+      shift_from TEXT,
+      shift_to TEXT,
+      permissions JSONB,
+      photo_url TEXT,
+      is_first_login BOOLEAN DEFAULT true,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
 }
 
 module.exports = { pool, init };

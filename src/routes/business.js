@@ -67,7 +67,7 @@ router.post('/auth/business/login', loginLimiter, async (req, res, next) => {
 
     const normalized = email.toLowerCase().trim();
     const result = await pool.query(
-      'SELECT email, password_hash, two_fa_enabled, name FROM businesses WHERE email = $1',
+      'SELECT email, password_hash, name FROM users WHERE email = $1',
       [normalized]
     );
     const business = result.rows[0];
@@ -77,15 +77,12 @@ router.post('/auth/business/login', loginLimiter, async (req, res, next) => {
 
     if (!business || !matches) return res.json({ success: false, message: 'Ungültige Zugangsdaten' });
 
-    if (business.two_fa_enabled) {
-      const code = crypto.randomInt(100000, 1000000).toString();
-      store.set(storeKey('code', normalized), sha256(code), config.code.ttlSeconds);
-      store.del(storeKey('code-attempts', normalized));
-      await sendVerificationEmail(normalized, business.name, code);
-      return res.json({ success: false, requires2fa: true });
-    }
-
-    res.json({ success: true, token: signToken({ email: normalized, type: 'business' }) });
+    // Businesses always require 2FA
+    const code = crypto.randomInt(100000, 1000000).toString();
+    store.set(storeKey('code', normalized), sha256(code), config.code.ttlSeconds);
+    store.del(storeKey('code-attempts', normalized));
+    await sendVerificationEmail(normalized, business.name, code);
+    return res.json({ requires2fa: true });
   } catch (err) { next(err); }
 });
 
@@ -123,7 +120,7 @@ router.post('/auth/business/verify-2fa', codeLimiter, async (req, res, next) => 
 
     store.del(codeKey, attemptsKey);
 
-    const businessResult = await pool.query('SELECT name FROM businesses WHERE email = $1', [normalized]);
+    const businessResult = await pool.query('SELECT name FROM users WHERE email = $1', [normalized]);
     if (businessResult.rows.length === 0) return res.json({ success: false, message: 'Ungültige Zugangsdaten' });
 
     res.json({ success: true, token: signToken({ email: normalized, type: 'business' }) });
@@ -290,14 +287,14 @@ router.post('/auth/business/change-password', async (req, res, next) => {
       return res.status(400).json({ success: false, message: 'Neues Passwort muss mindestens 8 Zeichen lang sein.' });
     }
 
-    const result = await pool.query('SELECT password_hash FROM businesses WHERE email = $1', [user.email]);
+    const result = await pool.query('SELECT password_hash FROM users WHERE email = $1', [user.email]);
     if (result.rows.length === 0) return res.status(404).json({ success: false, message: 'Business nicht gefunden.' });
 
     const match = await bcrypt.compare(current_password, result.rows[0].password_hash);
     if (!match) return res.status(400).json({ success: false, message: 'Aktuelles Passwort ist falsch.' });
 
     const newHash = await bcrypt.hash(new_password, SALT_ROUNDS);
-    await pool.query('UPDATE businesses SET password_hash = $1 WHERE email = $2', [newHash, user.email]);
+    await pool.query('UPDATE users SET password_hash = $1 WHERE email = $2', [newHash, user.email]);
 
     res.json({ success: true });
   } catch (err) { next(err); }
