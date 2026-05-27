@@ -100,7 +100,7 @@ router.post('/verify-code', async (req, res, next) => {
     store.del(codeKey, attemptsKey);
 
     const token = jwt.sign(
-      { email: email.toLowerCase().trim() },
+      { email: email.toLowerCase().trim(), type: 'customer' },
       config.jwtSecret,
       { expiresIn: config.jwtExpiresIn }
     );
@@ -143,7 +143,12 @@ router.post('/auth/login', async (req, res, next) => {
     const hash = user ? user.password_hash : '$2a$12$invalidhashinvalidhashinvalidhashinvalidhashinvalid';
     const match = await bcrypt.compare(password, hash);
     if (!match || !user) return res.status(200).json({ success: false });
-    res.json({ success: true });
+    const token = jwt.sign(
+      { email: normalized, type: 'customer' },
+      config.jwtSecret,
+      { expiresIn: config.jwtExpiresIn }
+    );
+    res.json({ success: true, token });
   } catch (err) { next(err); }
 });
 
