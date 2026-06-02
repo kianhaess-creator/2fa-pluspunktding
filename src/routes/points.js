@@ -26,23 +26,24 @@ function signPayload(payload) {
   return crypto
     .createHmac('sha256', config.qrSecret)
     .update(canonical)
-    .digest('hex');
+    .digest('base64url'); // base64url statt hex: 43 Zeichen statt 64
 }
 
 function verifySignature(payload, signature) {
   const expected = signPayload(payload);
   try {
-    return crypto.timingSafeEqual(
-      Buffer.from(expected,  'hex'),
-      Buffer.from(signature, 'hex')
-    );
+    // Längencheck vor timingSafeEqual (verhindert Buffer-Längen-Exception)
+    const a = Buffer.from(expected,  'base64url');
+    const b = Buffer.from(signature, 'base64url');
+    if (a.length !== b.length) return false;
+    return crypto.timingSafeEqual(a, b);
   } catch {
     return false;
   }
 }
 
 function generateNonce() {
-  return crypto.randomBytes(24).toString('hex');
+  return crypto.randomBytes(12).toString('base64url'); // 16 Zeichen statt 48
 }
 
 function consumeNonce(nonce, ttlSeconds) {
