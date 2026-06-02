@@ -105,17 +105,11 @@ router.post('/points/generate-qr', generateLimiter, requireJwt, async (req, res,
     const expiresAt = now + config.qrTtlSeconds;
     const nonce     = generateNonce();
 
-    const payloadData = {
-      type:           'points',
-      business_email: businessEmail,
-      points,
-      issued_at:      now,
-      expires_at:     expiresAt,
-      nonce,
-    };
-
-    const sig     = signPayload(payloadData);
-    const full    = { ...payloadData, sig };
+    // Short keys to minimise payload size → smaller QR version → larger modules → reliable scan
+    // t=type, b=business_email, p=points, e=expires_at, n=nonce, s=sig (truncated to 22 chars)
+    const payloadData = { t: 'pts', b: businessEmail, p: points, e: expiresAt, n: nonce };
+    const sig       = signPayload(payloadData).slice(0, 22);
+    const full      = { ...payloadData, s: sig };
     const qrPayload = Buffer.from(JSON.stringify(full)).toString('base64url');
 
     res.json({ success: true, qr_payload: qrPayload, points, expires_in: config.qrTtlSeconds });
@@ -141,19 +135,33 @@ router.post('/points/redeem-qr', redeemLimiter, requireJwt, async (req, res, nex
       return res.status(400).json({ success: false, message: 'Ungültiger QR-Code.' });
     }
 
-    const { type, business_email, points, issued_at, expires_at, nonce, sig } = parsed;
+    // Support both short-key format {t,b,p,e,n,s} and legacy long-key format
+    const isShort = parsed.t !== undefined;
+    const type           = isShort ? (parsed.t === 'pts' ? 'points' : parsed.t) : parsed.type;
+    const business_email = isShort ? parsed.b : parsed.business_email;
+    const points         = isShort ? parsed.p : parsed.points;
+    const expires_at     = isShort ? parsed.e : parsed.expires_at;
+    const nonce          = isShort ? parsed.n : parsed.nonce;
+    const sig            = isShort ? parsed.s : parsed.sig;
 
     if (type !== 'points') {
       return res.status(400).json({ success: false, message: 'Falscher QR-Code-Typ.' });
     }
 
-    if (!business_email || !points || !issued_at || !expires_at || !nonce || !sig) {
+    if (!business_email || !points || !expires_at || !nonce || !sig) {
       return res.status(400).json({ success: false, message: 'Unvollständiger QR-Code.' });
     }
 
     // 1. Signatur validieren
-    const payloadWithoutSig = { type, business_email, points, issued_at, expires_at, nonce };
-    if (!verifySignature(payloadWithoutSig, sig)) {
+    const payloadWithoutSig = isShort
+      ? { t: parsed.t, b: parsed.b, p: parsed.p, e: parsed.e, n: parsed.n }
+      : { type, business_email, points, issued_at: parsed.issued_at, expires_at, nonce };
+    // For short format: compare truncated sig (22 chars)
+    const fullSig = signPayload(payloadWithoutSig);
+    const sigValid = isShort
+      ? (sig === fullSig.slice(0, 22))
+      : verifySignature(payloadWithoutSig, sig);
+    if (!sigValid) {
       return res.status(400).json({ success: false, message: 'Ungültige QR-Code-Signatur.' });
     }
 
@@ -267,18 +275,10 @@ router.post('/coupon/generate-qr', redeemLimiter, requireJwt, async (req, res, n
     );
 
     const nonce = generateNonce();
-    const payloadData = {
-      type:             'coupon',
-      business_email:   reward.business_email,
-      reward_id,
-      temp_customer_id: tempCustomerId,
-      issued_at:        now,
-      expires_at:       expiresAt,
-      nonce,
-    };
-
-    const sig       = signPayload(payloadData);
-    const full      = { ...payloadData, sig };
+    // Short keys: t=type, b=business_email, r=reward_id, c=temp_customer_id, e=expires_at, n=nonce, s=sig
+    const payloadData = { t: 'cpn', b: reward.business_email, r: reward_id, c: tempCustomerId, e: expiresAt, n: nonce };
+    const sig       = signPayload(payloadData).slice(0, 22);
+    const full      = { ...payloadData, s: sig };
     const qrPayload = Buffer.from(JSON.stringify(full)).toString('base64url');
 
     res.json({
@@ -310,19 +310,33 @@ router.post('/coupon/redeem-qr', redeemLimiter, requireJwt, async (req, res, nex
       return res.status(400).json({ success: false, message: 'Ungültiger QR-Code.' });
     }
 
-    const { type, business_email, reward_id, temp_customer_id, issued_at, expires_at, nonce, sig } = parsed;
+    // Support both short-key format {t,b,r,c,e,n,s} and legacy long-key format
+    const isShortC        = parsed.t !== undefined;
+    const type            = isShortC ? (parsed.t === 'cpn' ? 'coupon' : parsed.t) : parsed.type;
+    const business_email  = isShortC ? parsed.b : parsed.business_email;
+    const reward_id       = isShortC ? parsed.r : parsed.reward_id;
+    const temp_customer_id= isShortC ? parsed.c : parsed.temp_customer_id;
+    const expires_at      = isShortC ? parsed.e : parsed.expires_at;
+    const nonce           = isShortC ? parsed.n : parsed.nonce;
+    const sig             = isShortC ? parsed.s : parsed.sig;
 
     if (type !== 'coupon') {
       return res.status(400).json({ success: false, message: 'Falscher QR-Code-Typ.' });
     }
 
-    if (!business_email || !reward_id || !temp_customer_id || !issued_at || !expires_at || !nonce || !sig) {
+    if (!business_email || !reward_id || !temp_customer_id || !expires_at || !nonce || !sig) {
       return res.status(400).json({ success: false, message: 'Unvollständiger QR-Code.' });
     }
 
     // 1. Signatur
-    const payloadWithoutSig = { type, business_email, reward_id, temp_customer_id, issued_at, expires_at, nonce };
-    if (!verifySignature(payloadWithoutSig, sig)) {
+    const payloadWithoutSigC = isShortC
+      ? { t: parsed.t, b: parsed.b, r: parsed.r, c: parsed.c, e: parsed.e, n: parsed.n }
+      : { type, business_email, reward_id, temp_customer_id, issued_at: parsed.issued_at, expires_at, nonce };
+    const fullSigC = signPayload(payloadWithoutSigC);
+    const sigValidC = isShortC
+      ? (sig === fullSigC.slice(0, 22))
+      : verifySignature(payloadWithoutSigC, sig);
+    if (!sigValidC) {
       return res.status(400).json({ success: false, message: 'Ungültige QR-Code-Signatur.' });
     }
 
