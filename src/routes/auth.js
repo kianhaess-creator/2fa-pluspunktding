@@ -199,6 +199,17 @@ router.get('/auth/profile', requireJwt, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+router.post('/auth/refresh', requireJwt, async (req, res, next) => {
+  try {
+    const token = jwt.sign(
+      { email: req.user.email, type: req.user.type || 'customer' },
+      config.jwtSecret,
+      { expiresIn: config.jwtExpiresIn }
+    );
+    res.json({ success: true, token });
+  } catch (err) { next(err); }
+});
+
 router.post('/auth/reset-password', async (req, res, next) => {
   try {
     const { email, newPassword } = req.body;
