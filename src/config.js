@@ -23,7 +23,7 @@ module.exports = {
   },
   hashPepper: required('CODE_HASH_PEPPER'),
   jwtSecret: required('JWT_SECRET'),
-  jwtExpiresIn: '24h',
+  jwtExpiresIn: '30d',
 
   // QR-Code Signierung (Punkte & Coupons)
   qrSecret: required('QR_SECRET'),            // HMAC-Schlüssel für QR-Signaturen
