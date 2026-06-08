@@ -27,6 +27,6 @@ module.exports = {
 
   // QR-Code Signierung (Punkte & Coupons)
   qrSecret: required('QR_SECRET'),            // HMAC-Schlüssel für QR-Signaturen
-  qrTtlSeconds: 5 * 60,                        // Punkte-QR läuft nach 5 Minuten ab
+  qrTtlSeconds: 15 * 60,                       // Punkte-QR läuft nach 15 Minuten ab
   couponQrTtlSeconds: 10 * 60,                 // Coupon-QR läuft nach 10 Minuten ab
 };

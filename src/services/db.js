@@ -78,6 +78,21 @@ async function init() {
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_pt_nonce          ON point_transactions (nonce)`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_ubp_user_email    ON user_business_points (user_email)`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_ubp_business_email ON user_business_points (business_email)`);
+
+  // ── qr_tokens: temporäre QR-Code-Tokens (15 Min. gültig) ─────────────────
+  // Speichert jeden generierten QR-Token mit Betrag, Shop und Ablaufzeit.
+  // Nach erfolgreichem Scan oder Ablauf wird der Eintrag gelöscht.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS qr_tokens (
+      token          TEXT        PRIMARY KEY,
+      business_email TEXT        NOT NULL,
+      points         INTEGER     NOT NULL CHECK (points > 0),
+      expires_at     TIMESTAMPTZ NOT NULL,
+      created_at     TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_qrt_business_email ON qr_tokens (business_email)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_qrt_expires_at     ON qr_tokens (expires_at)`);
 }
 
 module.exports = { pool, init };

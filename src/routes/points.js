@@ -112,6 +112,14 @@ router.post('/points/generate-qr', generateLimiter, requireJwt, async (req, res,
     const full      = { ...payloadData, s: sig };
     const qrPayload = Buffer.from(JSON.stringify(full)).toString('base64url');
 
+    // Token in Supabase persistieren (Token=nonce, Betrag, Shop-ID, Ablaufzeit)
+    await pool.query(
+      `INSERT INTO qr_tokens (token, business_email, points, expires_at)
+       VALUES ($1, $2, $3, TO_TIMESTAMP($4))
+       ON CONFLICT (token) DO NOTHING`,
+      [nonce, businessEmail, points, expiresAt]
+    );
+
     res.json({ success: true, qr_payload: qrPayload, points, expires_in: config.qrTtlSeconds });
   } catch (err) { next(err); }
 });
@@ -171,11 +179,37 @@ router.post('/points/redeem-qr', redeemLimiter, requireJwt, async (req, res, nex
       return res.status(400).json({ success: false, message: 'QR-Code ist abgelaufen.' });
     }
 
-    // 3. Replay-Schutz
+    // 3. Replay-Schutz (In-Memory)
     const remaining = expires_at - now;
     if (!consumeNonce(nonce, remaining)) {
       return res.status(400).json({ success: false, message: 'QR-Code wurde bereits verwendet.' });
     }
+
+    // 3b. Supabase-Validierung: Token muss existieren, Betrag + Shop müssen übereinstimmen
+    const tokenRow = await pool.query(
+      `SELECT token, business_email, points, expires_at
+       FROM   qr_tokens
+       WHERE  token = $1`,
+      [nonce]
+    );
+    if (!tokenRow.rows.length) {
+      return res.status(400).json({ success: false, message: 'QR-Code ungültig oder bereits verwendet.' });
+    }
+    const dbToken = tokenRow.rows[0];
+
+    // Ablaufzeit serverseitig nochmals prüfen (Supabase-Zeitstempel)
+    if (new Date(dbToken.expires_at) < new Date()) {
+      await pool.query('DELETE FROM qr_tokens WHERE token = $1', [nonce]);
+      return res.status(400).json({ success: false, message: 'QR-Code ist abgelaufen.' });
+    }
+
+    // Betrag und Shop-ID müssen mit DB-Eintrag übereinstimmen
+    if (dbToken.business_email !== business_email || dbToken.points !== points) {
+      return res.status(400).json({ success: false, message: 'QR-Code wurde manipuliert.' });
+    }
+
+    // Token sofort löschen (Einmalverwendung)
+    await pool.query('DELETE FROM qr_tokens WHERE token = $1', [nonce]);
 
     // 4. Business existiert prüfen
     const bizResult = await pool.query(

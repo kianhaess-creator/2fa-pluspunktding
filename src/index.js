@@ -6,7 +6,7 @@ const requireApiKey = require('./middleware/apiKey');
 const authRoutes    = require('./routes/auth');
 const businessRoutes = require('./routes/business');
 const pointsRoutes  = require('./routes/points');
-const { init } = require('./services/db');
+const { init, pool } = require('./services/db');
 
 const app = express();
 
@@ -44,6 +44,18 @@ init()
     app.listen(config.port, () => {
       console.log(`2FA service running on port ${config.port} ✓`);
     });
+
+    // Abgelaufene QR-Tokens aus der DB löschen (alle 5 Minuten)
+    setInterval(async () => {
+      try {
+        const result = await pool.query('DELETE FROM qr_tokens WHERE expires_at < NOW()');
+        if (result.rowCount > 0) {
+          console.log(`[QR Cleanup] ${result.rowCount} abgelaufene Token(s) gelöscht.`);
+        }
+      } catch (err) {
+        console.error('[QR Cleanup] Fehler:', err.message);
+      }
+    }, 5 * 60 * 1000);
   })
   .catch((err) => {
     console.error('DB init failed:', err.message);
