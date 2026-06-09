@@ -93,6 +93,21 @@ async function init() {
   `);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_qrt_business_email ON qr_tokens (business_email)`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_qrt_expires_at     ON qr_tokens (expires_at)`);
+
+  // ── coupon_tokens: persistente Coupon-QR-Sessions ─────────────────────────
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS coupon_tokens (
+      nonce           TEXT        PRIMARY KEY,
+      customer_email  TEXT        NOT NULL,
+      business_email  TEXT        NOT NULL,
+      reward_id       uuid        NOT NULL,
+      points_cost     INTEGER     NOT NULL CHECK (points_cost > 0),
+      expires_at      TIMESTAMPTZ NOT NULL,
+      created_at      TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_ct_business_email ON coupon_tokens (business_email)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_ct_expires_at     ON coupon_tokens (expires_at)`);
 }
 
 module.exports = { pool, init };

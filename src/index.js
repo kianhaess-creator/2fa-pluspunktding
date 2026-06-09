@@ -45,13 +45,13 @@ init()
       console.log(`2FA service running on port ${config.port} ✓`);
     });
 
-    // Abgelaufene QR-Tokens aus der DB löschen (alle 5 Minuten)
+    // Abgelaufene Tokens aus der DB löschen (alle 5 Minuten)
     setInterval(async () => {
       try {
-        const result = await pool.query('DELETE FROM qr_tokens WHERE expires_at < NOW()');
-        if (result.rowCount > 0) {
-          console.log(`[QR Cleanup] ${result.rowCount} abgelaufene Token(s) gelöscht.`);
-        }
+        const r1 = await pool.query('DELETE FROM qr_tokens WHERE expires_at < NOW()');
+        if (r1.rowCount > 0) console.log(`[QR Cleanup] ${r1.rowCount} Punkte-Token(s) gelöscht.`);
+        const r2 = await pool.query('DELETE FROM coupon_tokens WHERE expires_at < NOW()');
+        if (r2.rowCount > 0) console.log(`[QR Cleanup] ${r2.rowCount} Coupon-Token(s) gelöscht.`);
       } catch (err) {
         console.error('[QR Cleanup] Fehler:', err.message);
       }

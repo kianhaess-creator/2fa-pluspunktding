@@ -297,23 +297,25 @@ router.post('/coupon/generate-qr', redeemLimiter, requireJwt, async (req, res, n
       });
     }
 
-    // Temporäre Kunden-ID erzeugen (kein Personenbezug im QR)
-    const tempCustomerId = crypto.randomBytes(20).toString('hex');
-    const now            = Math.floor(Date.now() / 1000);
-    const expiresAt      = now + config.couponQrTtlSeconds;
+    const now       = Math.floor(Date.now() / 1000);
+    const expiresAt = now + config.couponQrTtlSeconds;
+    const nonce     = generateNonce();
 
-    store.set(
-      `coupon_temp:${tempCustomerId}`,
-      JSON.stringify({ email: user.email, reward_id }),
-      config.couponQrTtlSeconds + 120
-    );
-
-    const nonce = generateNonce();
-    // Short keys: t=type, b=business_email, r=reward_id, c=temp_customer_id, e=expires_at, n=nonce, s=sig
-    const payloadData = { t: 'cpn', b: reward.business_email, r: reward_id, c: tempCustomerId, e: expiresAt, n: nonce };
+    // Short keys: t=type, b=business_email, r=reward_id, n=nonce, e=expires_at, s=sig
+    // temp_customer_id entfernt — Kunden-E-Mail wird direkt in DB gespeichert
+    const payloadData = { t: 'cpn', b: reward.business_email, r: reward_id, n: nonce, e: expiresAt };
     const sig       = signPayload(payloadData).slice(0, 22);
     const full      = { ...payloadData, s: sig };
     const qrPayload = Buffer.from(JSON.stringify(full)).toString('base64url');
+
+    // Coupon-Token in DB persistieren (überlebt Server-Neustart)
+    await pool.query(
+      `INSERT INTO coupon_tokens
+         (nonce, customer_email, business_email, reward_id, points_cost, expires_at)
+       VALUES ($1, $2, $3, $4, $5, TO_TIMESTAMP($6))
+       ON CONFLICT (nonce) DO NOTHING`,
+      [nonce, user.email, reward.business_email, reward_id, reward.points_cost, expiresAt]
+    );
 
     res.json({
       success:      true,
@@ -344,32 +346,31 @@ router.post('/coupon/redeem-qr', redeemLimiter, requireJwt, async (req, res, nex
       return res.status(400).json({ success: false, message: 'Ungültiger QR-Code.' });
     }
 
-    // Support both short-key format {t,b,r,c,e,n,s} and legacy long-key format
-    const isShortC        = parsed.t !== undefined;
-    const type            = isShortC ? (parsed.t === 'cpn' ? 'coupon' : parsed.t) : parsed.type;
-    const business_email  = isShortC ? parsed.b : parsed.business_email;
-    const reward_id       = isShortC ? parsed.r : parsed.reward_id;
-    const temp_customer_id= isShortC ? parsed.c : parsed.temp_customer_id;
-    const expires_at      = isShortC ? parsed.e : parsed.expires_at;
-    const nonce           = isShortC ? parsed.n : parsed.nonce;
-    const sig             = isShortC ? parsed.s : parsed.sig;
+    // Support both short-key format {t,b,r,n,e,s} and legacy format {t,b,r,c,e,n,s}
+    const isShortC       = parsed.t !== undefined;
+    const type           = isShortC ? (parsed.t === 'cpn' ? 'coupon' : parsed.t) : parsed.type;
+    const business_email = isShortC ? parsed.b : parsed.business_email;
+    const reward_id      = isShortC ? parsed.r : parsed.reward_id;
+    const expires_at     = isShortC ? parsed.e : parsed.expires_at;
+    const nonce          = isShortC ? parsed.n : parsed.nonce;
+    const sig            = isShortC ? parsed.s : parsed.sig;
 
     if (type !== 'coupon') {
       return res.status(400).json({ success: false, message: 'Falscher QR-Code-Typ.' });
     }
 
-    if (!business_email || !reward_id || !temp_customer_id || !expires_at || !nonce || !sig) {
+    if (!business_email || !reward_id || !expires_at || !nonce || !sig) {
       return res.status(400).json({ success: false, message: 'Unvollständiger QR-Code.' });
     }
 
-    // 1. Signatur
-    const payloadWithoutSigC = isShortC
-      ? { t: parsed.t, b: parsed.b, r: parsed.r, c: parsed.c, e: parsed.e, n: parsed.n }
-      : { type, business_email, reward_id, temp_customer_id, issued_at: parsed.issued_at, expires_at, nonce };
-    const fullSigC = signPayload(payloadWithoutSigC);
-    const sigValidC = isShortC
-      ? (sig === fullSigC.slice(0, 22))
-      : verifySignature(payloadWithoutSigC, sig);
+    // 1. Signatur prüfen (ohne temp_customer_id — neues Format)
+    const payloadForSig = isShortC
+      ? { t: parsed.t, b: parsed.b, r: parsed.r, n: parsed.n, e: parsed.e }
+      : { type, business_email, reward_id, nonce, expires_at };
+    // Legacy-Format mit c-Feld ebenfalls unterstützen
+    if (isShortC && parsed.c !== undefined) payloadForSig.c = parsed.c;
+    const fullSigC  = signPayload(payloadForSig);
+    const sigValidC = sig === fullSigC.slice(0, 22);
     if (!sigValidC) {
       return res.status(400).json({ success: false, message: 'Ungültige QR-Code-Signatur.' });
     }
@@ -377,32 +378,34 @@ router.post('/coupon/redeem-qr', redeemLimiter, requireJwt, async (req, res, nex
     // 2. Ablaufzeit
     const now = Math.floor(Date.now() / 1000);
     if (now > expires_at) {
+      await pool.query('DELETE FROM coupon_tokens WHERE nonce = $1', [nonce]);
       return res.status(400).json({ success: false, message: 'Coupon-QR-Code ist abgelaufen.' });
     }
 
-    // 3. Replay-Schutz
-    const remaining = expires_at - now;
-    if (!consumeNonce(nonce, remaining)) {
-      return res.status(400).json({ success: false, message: 'Coupon wurde bereits eingelöst.' });
+    // 3. DB-Token laden und Einmalverwendung sicherstellen
+    const tokenRow = await pool.query(
+      `SELECT customer_email, business_email, reward_id, points_cost, expires_at
+       FROM coupon_tokens WHERE nonce = $1`,
+      [nonce]
+    );
+    if (!tokenRow.rows.length) {
+      return res.status(400).json({ success: false, message: 'Coupon wurde bereits eingelöst oder ist ungültig.' });
+    }
+    const dbToken = tokenRow.rows[0];
+
+    if (new Date(dbToken.expires_at) < new Date()) {
+      await pool.query('DELETE FROM coupon_tokens WHERE nonce = $1', [nonce]);
+      return res.status(400).json({ success: false, message: 'Coupon-QR-Code ist abgelaufen.' });
     }
 
-    // 4. Temp-ID → echte Kunden-E-Mail auflösen
-    const tempKey = store.get(`coupon_temp:${temp_customer_id}`);
-    if (!tempKey) {
-      return res.status(400).json({ success: false, message: 'Coupon-Session abgelaufen oder ungültig.' });
+    if (dbToken.business_email !== business_email || dbToken.reward_id !== reward_id) {
+      return res.status(400).json({ success: false, message: 'Coupon-Daten stimmen nicht überein.' });
     }
-    let sessionData;
-    try { sessionData = JSON.parse(tempKey); } catch {
-      return res.status(400).json({ success: false, message: 'Coupon-Session ungültig.' });
-    }
-    const customerEmail = sessionData.email;
 
     // Sofort löschen (Einmalverwendung)
-    store.del(`coupon_temp:${temp_customer_id}`);
+    await pool.query('DELETE FROM coupon_tokens WHERE nonce = $1', [nonce]);
 
-    if (sessionData.reward_id !== reward_id) {
-      return res.status(400).json({ success: false, message: 'Reward-ID stimmt nicht überein.' });
-    }
+    const customerEmail = dbToken.customer_email;
 
     // 5. Reward laden
     const rewardResult = await pool.query(
