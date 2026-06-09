@@ -273,6 +273,32 @@ router.post('/auth/business/register-employee', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// POST /api/auth/employee/change-password  (business changes an employee's password)
+router.post('/auth/employee/change-password', async (req, res, next) => {
+  try {
+    let user;
+    try { user = verifyToken(req); } catch (e) { return res.status(e.status).json({ error: e.message }); }
+    if (user.type !== 'business') return res.status(403).json({ success: false, message: 'Nur Unternehmen dürfen Passwörter von Mitarbeitern ändern.' });
+
+    const { employee_id, new_password } = req.body;
+    if (!employee_id || !new_password || typeof new_password !== 'string' || new_password.length < 6) {
+      return res.status(400).json({ success: false, message: 'employee_id und new_password (min. 6 Zeichen) erforderlich.' });
+    }
+
+    const empResult = await pool.query(
+      'SELECT id FROM business_employees WHERE id = $1 AND business_email = $2',
+      [employee_id, user.email]
+    );
+    if (empResult.rows.length === 0) {
+      return res.status(404).json({ success: false, message: 'Mitarbeiter nicht gefunden.' });
+    }
+
+    const newHash = await bcrypt.hash(new_password, SALT_ROUNDS);
+    await pool.query('UPDATE business_employees SET password_hash = $1 WHERE id = $2', [newHash, employee_id]);
+    res.json({ success: true });
+  } catch (err) { next(err); }
+});
+
 router.post('/auth/business/change-password', async (req, res, next) => {
   try {
     let user;
