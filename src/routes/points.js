@@ -43,7 +43,18 @@ function verifySignature(payload, signature) {
 }
 
 function generateNonce() {
-  return crypto.randomBytes(12).toString('base64url'); // 16 Zeichen statt 48
+  return crypto.randomBytes(24).toString('base64url'); // 32 Zeichen, 192 Bit Entropie
+}
+
+async function employeeHasPerm(employeeId, perm) {
+  if (!employeeId) return false;
+  const r = await pool.query(
+    'SELECT permissions FROM business_employees WHERE id = $1',
+    [employeeId]
+  );
+  const perms = r.rows[0]?.permissions;
+  if (!perms) return false;
+  return perms[perm] === true;
 }
 
 function consumeNonce(nonce, ttlSeconds) {
@@ -67,6 +78,12 @@ const redeemLimiter = rateLimit({
   message: { success: false, message: 'Zu viele Einlöseversuche. Bitte warte eine Minute.' },
 });
 
+const readLimiter = rateLimit({
+  windowMs: 60 * 1000, max: 60,
+  standardHeaders: true, legacyHeaders: false,
+  message: { success: false, message: 'Zu viele Anfragen. Bitte warte eine Minute.' },
+});
+
 // ─── POST /api/points/generate-qr ─────────────────────────────────────────────
 // Aufgerufen von: Employee-Dashboard oder Business-Dashboard
 // JWT: type === 'employee' ODER type === 'business'
@@ -77,6 +94,11 @@ router.post('/points/generate-qr', generateLimiter, requireJwt, async (req, res,
 
     if (user.type !== 'employee' && user.type !== 'business') {
       return res.status(403).json({ success: false, message: 'Keine Berechtigung.' });
+    }
+
+    if (user.type === 'employee') {
+      const allowed = await employeeHasPerm(user.employee_id, 'grantPoints');
+      if (!allowed) return res.status(403).json({ success: false, message: 'Keine Berechtigung zum Ausstellen von Punkten.' });
     }
 
     const rawAmount = parseFloat(String(req.body.purchase_amount || '0').replace(',', '.'));
@@ -96,10 +118,8 @@ router.post('/points/generate-qr', generateLimiter, requireJwt, async (req, res,
     const expiresAt = now + config.qrTtlSeconds;
     const nonce     = generateNonce();
 
-    // Short keys to minimise payload size → smaller QR version → larger modules → reliable scan
-    // t=type, b=business_email, p=points, e=expires_at, n=nonce, s=sig (truncated to 22 chars)
     const payloadData = { t: 'pts', b: businessEmail, p: points, e: expiresAt, n: nonce };
-    const sig       = signPayload(payloadData).slice(0, 22);
+    const sig       = signPayload(payloadData);
     const full      = { ...payloadData, s: sig };
     const qrPayload = Buffer.from(JSON.stringify(full)).toString('base64url');
 
@@ -126,22 +146,25 @@ router.post('/points/redeem-qr', redeemLimiter, requireJwt, async (req, res, nex
       return res.status(403).json({ success: false, message: 'Nur Kunden können QR-Codes einlösen.' });
     }
 
+    const qrPayloadRaw = req.body.qr_payload;
+    if (!qrPayloadRaw || typeof qrPayloadRaw !== 'string' || qrPayloadRaw.length > 2048) {
+      return res.status(400).json({ success: false, message: 'Ungültiger QR-Code.' });
+    }
+
     let parsed;
     try {
-      const raw = Buffer.from(req.body.qr_payload, 'base64url').toString('utf8');
+      const raw = Buffer.from(qrPayloadRaw, 'base64url').toString('utf8');
       parsed = JSON.parse(raw);
     } catch {
       return res.status(400).json({ success: false, message: 'Ungültiger QR-Code.' });
     }
 
-    // Support both short-key format {t,b,p,e,n,s} and legacy long-key format
-    const isShort = parsed.t !== undefined;
-    const type           = isShort ? (parsed.t === 'pts' ? 'points' : parsed.t) : parsed.type;
-    const business_email = isShort ? parsed.b : parsed.business_email;
-    const points         = isShort ? parsed.p : parsed.points;
-    const expires_at     = isShort ? parsed.e : parsed.expires_at;
-    const nonce          = isShort ? parsed.n : parsed.nonce;
-    const sig            = isShort ? parsed.s : parsed.sig;
+    const type           = parsed.t === 'pts' ? 'points' : parsed.t;
+    const business_email = parsed.b;
+    const points         = parsed.p;
+    const expires_at     = parsed.e;
+    const nonce          = parsed.n;
+    const sig            = parsed.s;
 
     if (type !== 'points') {
       return res.status(400).json({ success: false, message: 'Falscher QR-Code-Typ.' });
@@ -151,16 +174,9 @@ router.post('/points/redeem-qr', redeemLimiter, requireJwt, async (req, res, nex
       return res.status(400).json({ success: false, message: 'Unvollständiger QR-Code.' });
     }
 
-    // 1. Signatur validieren
-    const payloadWithoutSig = isShort
-      ? { t: parsed.t, b: parsed.b, p: parsed.p, e: parsed.e, n: parsed.n }
-      : { type, business_email, points, issued_at: parsed.issued_at, expires_at, nonce };
-    // For short format: compare truncated sig (22 chars)
-    const fullSig = signPayload(payloadWithoutSig);
-    const sigValid = isShort
-      ? (sig === fullSig.slice(0, 22))
-      : verifySignature(payloadWithoutSig, sig);
-    if (!sigValid) {
+    // 1. Signatur validieren (volle HMAC-SHA256, timing-safe)
+    const payloadWithoutSig = { t: parsed.t, b: parsed.b, p: parsed.p, e: parsed.e, n: parsed.n };
+    if (!verifySignature(payloadWithoutSig, sig)) {
       return res.status(400).json({ success: false, message: 'Ungültige QR-Code-Signatur.' });
     }
 
@@ -259,17 +275,12 @@ router.post('/coupon/generate-qr', redeemLimiter, requireJwt, async (req, res, n
       Authorization: `Bearer ${config.supabaseServiceKey}`,
       'Content-Type': 'application/json',
     };
-    const rewardUrl = `${config.supabaseUrl}/rest/v1/business_rewards?id=eq.${encodeURIComponent(reward_id)}&select=id,business_email,points_cost,title,status&limit=1`;
-    console.log('[coupon/generate-qr] fetching reward:', rewardUrl);
+    const rewardUrl = `${config.supabaseUrl}/rest/v1/business_rewards?id=eq.${encodeURIComponent(reward_id)}&select=id,business_email,points_cost,title,status,allow_multiple&limit=1`;
     const rewardResp = await fetch(rewardUrl, { headers: sbHeaders });
-    console.log('[coupon/generate-qr] supabase status:', rewardResp.status);
     if (!rewardResp.ok) {
-      const errText = await rewardResp.text();
-      console.error('[coupon/generate-qr] supabase error:', errText);
-      return res.status(500).json({ success: false, message: 'Fehler beim Laden des Rewards: ' + errText.slice(0, 100) });
+      return res.status(500).json({ success: false, message: 'Fehler beim Laden des Rewards.' });
     }
     const rewardRows = await rewardResp.json();
-    console.log('[coupon/generate-qr] rows found:', rewardRows.length);
     if (!rewardRows.length) {
       return res.status(404).json({ success: false, message: 'Coupon nicht gefunden.' });
     }
@@ -312,7 +323,7 @@ router.post('/coupon/generate-qr', redeemLimiter, requireJwt, async (req, res, n
     // Short keys: t=type, b=business_email, r=reward_id, n=nonce, e=expires_at, s=sig
     // temp_customer_id entfernt — Kunden-E-Mail wird direkt in DB gespeichert
     const payloadData = { t: 'cpn', b: reward.business_email, r: reward_id, n: nonce, e: expiresAt };
-    const sig       = signPayload(payloadData).slice(0, 22);
+    const sig       = signPayload(payloadData);
     const full      = { ...payloadData, s: sig };
     const qrPayload = Buffer.from(JSON.stringify(full)).toString('base64url');
 
@@ -346,22 +357,30 @@ router.post('/coupon/redeem-qr', redeemLimiter, requireJwt, async (req, res, nex
       return res.status(403).json({ success: false, message: 'Keine Berechtigung.' });
     }
 
+    if (user.type === 'employee') {
+      const allowed = await employeeHasPerm(user.employee_id, 'redeemCodes');
+      if (!allowed) return res.status(403).json({ success: false, message: 'Keine Berechtigung zum Einlösen von Coupons.' });
+    }
+
+    const qrRaw = req.body.qr_payload;
+    if (!qrRaw || typeof qrRaw !== 'string' || qrRaw.length > 2048) {
+      return res.status(400).json({ success: false, message: 'Ungültiger QR-Code.' });
+    }
+
     let parsed;
     try {
-      const raw = Buffer.from(req.body.qr_payload, 'base64url').toString('utf8');
+      const raw = Buffer.from(qrRaw, 'base64url').toString('utf8');
       parsed = JSON.parse(raw);
     } catch {
       return res.status(400).json({ success: false, message: 'Ungültiger QR-Code.' });
     }
 
-    // Support both short-key format {t,b,r,n,e,s} and legacy format {t,b,r,c,e,n,s}
-    const isShortC       = parsed.t !== undefined;
-    const type           = isShortC ? (parsed.t === 'cpn' ? 'coupon' : parsed.t) : parsed.type;
-    const business_email = isShortC ? parsed.b : parsed.business_email;
-    const reward_id      = isShortC ? parsed.r : parsed.reward_id;
-    const expires_at     = isShortC ? parsed.e : parsed.expires_at;
-    const nonce          = isShortC ? parsed.n : parsed.nonce;
-    const sig            = isShortC ? parsed.s : parsed.sig;
+    const type           = parsed.t === 'cpn' ? 'coupon' : parsed.t;
+    const business_email = parsed.b;
+    const reward_id      = parsed.r;
+    const expires_at     = parsed.e;
+    const nonce          = parsed.n;
+    const sig            = parsed.s;
 
     if (type !== 'coupon') {
       return res.status(400).json({ success: false, message: 'Falscher QR-Code-Typ.' });
@@ -371,15 +390,9 @@ router.post('/coupon/redeem-qr', redeemLimiter, requireJwt, async (req, res, nex
       return res.status(400).json({ success: false, message: 'Unvollständiger QR-Code.' });
     }
 
-    // 1. Signatur prüfen (ohne temp_customer_id — neues Format)
-    const payloadForSig = isShortC
-      ? { t: parsed.t, b: parsed.b, r: parsed.r, n: parsed.n, e: parsed.e }
-      : { type, business_email, reward_id, nonce, expires_at };
-    // Legacy-Format mit c-Feld ebenfalls unterstützen
-    if (isShortC && parsed.c !== undefined) payloadForSig.c = parsed.c;
-    const fullSigC  = signPayload(payloadForSig);
-    const sigValidC = sig === fullSigC.slice(0, 22);
-    if (!sigValidC) {
+    // 1. Signatur prüfen (volle HMAC-SHA256, timing-safe)
+    const payloadForSig = { t: parsed.t, b: parsed.b, r: parsed.r, n: parsed.n, e: parsed.e };
+    if (!verifySignature(payloadForSig, sig)) {
       return res.status(400).json({ success: false, message: 'Ungültige QR-Code-Signatur.' });
     }
 
@@ -570,7 +583,7 @@ router.get('/points/history', requireJwt, async (req, res, next) => {
 });
 
 // ─── GET /api/rewards ─────────────────────────────────────────────────────────
-router.get('/rewards', async (req, res, next) => {
+router.get('/rewards', readLimiter, async (req, res, next) => {
   try {
     const { business_email } = req.query;
     if (!business_email) return res.status(400).json({ error: 'business_email required' });

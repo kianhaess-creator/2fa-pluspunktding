@@ -201,8 +201,17 @@ router.get('/auth/profile', requireJwt, async (req, res, next) => {
 
 router.post('/auth/refresh', requireJwt, async (req, res, next) => {
   try {
+    // Nur customer-Tokens dürfen refresht werden (business/employee erfordern Re-Login)
+    if (req.user.type !== 'customer') {
+      return res.status(403).json({ error: 'Refresh nur für Kunden-Accounts.' });
+    }
+    // Token darf nicht älter als 30 Tage sein (iat-Check)
+    const iat = req.user.iat || 0;
+    if (Math.floor(Date.now() / 1000) - iat > 30 * 24 * 60 * 60) {
+      return res.status(401).json({ error: 'Token zu alt. Bitte neu einloggen.' });
+    }
     const token = jwt.sign(
-      { email: req.user.email, type: req.user.type || 'customer' },
+      { email: req.user.email, type: 'customer' },
       config.jwtSecret,
       { expiresIn: config.jwtExpiresIn }
     );

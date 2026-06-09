@@ -10,7 +10,8 @@ const { sendVerificationEmail } = require('../services/email');
 const { pool } = require('../services/db');
 
 const SALT_ROUNDS = 12;
-const DUMMY_HASH = '$2a$12$invalidhashinvalidhashinvalidhashinvalidhashinvalid';
+// Echter bcrypt-Hash eines zufälligen Strings — verhindert Timing-Angriffe bei unbekannten E-Mails
+const DUMMY_HASH = '$2a$12$LkKe8dqmRB3C5YRQshFxCOizOCrNfOaV/1cjhUxE.XFV7JeNQbHQi';
 
 const loginLimiter = rateLimit({
   windowMs: 60 * 1000,
