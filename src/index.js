@@ -5,6 +5,7 @@ const config = require('./config');
 const authRoutes    = require('./routes/auth');
 const businessRoutes = require('./routes/business');
 const pointsRoutes  = require('./routes/points');
+const adminRoutes   = require('./routes/admin');
 const { init, pool } = require('./services/db');
 
 const app = express();
@@ -40,6 +41,7 @@ app.use(rateLimit({
 app.use('/api', businessRoutes);
 app.use('/api', authRoutes);
 app.use('/api', pointsRoutes);
+app.use('/api', adminRoutes);
 
 app.get('/health', (_req, res) => res.json({ status: 'ok' }));
 
