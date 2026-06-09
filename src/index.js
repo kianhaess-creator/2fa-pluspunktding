@@ -2,7 +2,6 @@ const express = require('express');
 const cors = require('cors');
 const rateLimit = require('express-rate-limit');
 const config = require('./config');
-const requireApiKey = require('./middleware/apiKey');
 const authRoutes    = require('./routes/auth');
 const businessRoutes = require('./routes/business');
 const pointsRoutes  = require('./routes/points');
@@ -38,7 +37,6 @@ app.use(rateLimit({
   message: { error: 'Too many requests' },
 }));
 
-app.use('/api', requireApiKey);
 app.use('/api', businessRoutes);
 app.use('/api', authRoutes);
 app.use('/api', pointsRoutes);
