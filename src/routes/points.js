@@ -249,6 +249,10 @@ router.post('/coupon/generate-qr', redeemLimiter, requireJwt, async (req, res, n
       return res.status(400).json({ success: false, message: 'Reward-ID fehlt.' });
     }
 
+    if (!config.supabaseUrl || !config.supabaseServiceKey) {
+      return res.status(503).json({ success: false, message: 'Server-Konfiguration unvollständig (SUPABASE_URL/KEY fehlt).' });
+    }
+
     // Reward aus Supabase laden (business_rewards liegt nur dort)
     const sbHeaders = {
       apikey: config.supabaseServiceKey,
