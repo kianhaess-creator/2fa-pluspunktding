@@ -279,6 +279,18 @@ router.post('/coupon/generate-qr', redeemLimiter, requireJwt, async (req, res, n
       return res.status(400).json({ success: false, message: 'Coupon ist nicht aktiv.' });
     }
 
+    // Einmalige Einlösung prüfen (allow_multiple === false)
+    if (reward.allow_multiple === false) {
+      const alreadyRedeemed = await pool.query(
+        `SELECT 1 FROM point_transactions
+         WHERE user_email = $1 AND reward_id = $2 AND type = 'redeem' LIMIT 1`,
+        [user.email, reward_id]
+      );
+      if (alreadyRedeemed.rows.length) {
+        return res.status(400).json({ success: false, message: 'Du hast diesen Coupon bereits eingelöst.' });
+      }
+    }
+
     // Punkte des Kunden bei diesem Unternehmen prüfen (user_business_points liegt im Backend-Pool)
     const ptsResult = await pool.query(
       'SELECT points FROM user_business_points WHERE user_email = $1 AND business_email = $2',
@@ -533,7 +545,7 @@ router.get('/points/history', requireJwt, async (req, res, next) => {
 
     if (user.type === 'customer') {
       const r = await pool.query(
-        `SELECT pt.points, pt.type, pt.created_at, b.name AS business_name
+        `SELECT pt.points, pt.type, pt.created_at, pt.reward_id, b.name AS business_name
          FROM   point_transactions pt
          LEFT   JOIN businesses b ON b.email = pt.business_email
          WHERE  pt.user_email = $1
@@ -563,14 +575,19 @@ router.get('/rewards', async (req, res, next) => {
     const { business_email } = req.query;
     if (!business_email) return res.status(400).json({ error: 'business_email required' });
 
-    const r = await pool.query(
-      `SELECT id, title, description, points_cost, image_url
-       FROM   business_rewards
-       WHERE  business_email = $1 AND status = 'active'
-       ORDER  BY points_cost ASC`,
-      [business_email]
-    );
-    res.json({ success: true, rewards: r.rows });
+    if (!config.supabaseUrl || !config.supabaseServiceKey) {
+      return res.status(503).json({ error: 'Server-Konfiguration unvollständig.' });
+    }
+
+    const sbH = {
+      apikey: config.supabaseServiceKey,
+      Authorization: `Bearer ${config.supabaseServiceKey}`,
+    };
+    const url = `${config.supabaseUrl}/rest/v1/business_rewards?business_email=eq.${encodeURIComponent(business_email)}&status=eq.active&select=id,title,description,points_cost,image_url,allow_multiple&order=points_cost.asc`;
+    const resp = await fetch(url, { headers: sbH });
+    if (!resp.ok) return res.status(500).json({ error: 'Fehler beim Laden der Rewards.' });
+    const rows = await resp.json();
+    res.json({ success: true, rewards: rows });
   } catch (err) { next(err); }
 });
 
