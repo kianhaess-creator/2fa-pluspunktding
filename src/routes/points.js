@@ -249,23 +249,30 @@ router.post('/coupon/generate-qr', redeemLimiter, requireJwt, async (req, res, n
       return res.status(400).json({ success: false, message: 'Reward-ID fehlt.' });
     }
 
-    // Reward laden
-    const rewardResult = await pool.query(
-      `SELECT id, business_email, points_cost, title, status
-       FROM   business_rewards
-       WHERE  id = $1`,
-      [reward_id]
+    // Reward aus Supabase laden (business_rewards liegt nur dort)
+    const sbHeaders = {
+      apikey: config.supabaseServiceKey,
+      Authorization: `Bearer ${config.supabaseServiceKey}`,
+      'Content-Type': 'application/json',
+    };
+    const rewardResp = await fetch(
+      `${config.supabaseUrl}/rest/v1/business_rewards?id=eq.${encodeURIComponent(reward_id)}&select=id,business_email,points_cost,title,status&limit=1`,
+      { headers: sbHeaders }
     );
-    if (!rewardResult.rows.length) {
+    if (!rewardResp.ok) {
+      return res.status(500).json({ success: false, message: 'Fehler beim Laden des Rewards.' });
+    }
+    const rewardRows = await rewardResp.json();
+    if (!rewardRows.length) {
       return res.status(404).json({ success: false, message: 'Coupon nicht gefunden.' });
     }
-    const reward = rewardResult.rows[0];
+    const reward = rewardRows[0];
 
     if (reward.status !== 'active') {
       return res.status(400).json({ success: false, message: 'Coupon ist nicht aktiv.' });
     }
 
-    // Punkte des Kunden bei diesem Unternehmen prüfen
+    // Punkte des Kunden bei diesem Unternehmen prüfen (user_business_points liegt im Backend-Pool)
     const ptsResult = await pool.query(
       'SELECT points FROM user_business_points WHERE user_email = $1 AND business_email = $2',
       [user.email, reward.business_email]
@@ -389,15 +396,24 @@ router.post('/coupon/redeem-qr', redeemLimiter, requireJwt, async (req, res, nex
 
     const customerEmail = dbToken.customer_email;
 
-    // 5. Reward laden
-    const rewardResult = await pool.query(
-      'SELECT id, points_cost, title, business_email FROM business_rewards WHERE id = $1',
-      [reward_id]
+    // 5. Reward aus Supabase laden
+    const sbHdrs = {
+      apikey: config.supabaseServiceKey,
+      Authorization: `Bearer ${config.supabaseServiceKey}`,
+      'Content-Type': 'application/json',
+    };
+    const rewardResp2 = await fetch(
+      `${config.supabaseUrl}/rest/v1/business_rewards?id=eq.${encodeURIComponent(reward_id)}&select=id,points_cost,title,business_email&limit=1`,
+      { headers: sbHdrs }
     );
-    if (!rewardResult.rows.length) {
+    if (!rewardResp2.ok) {
+      return res.status(500).json({ success: false, message: 'Fehler beim Laden des Rewards.' });
+    }
+    const rewardRows2 = await rewardResp2.json();
+    if (!rewardRows2.length) {
       return res.status(404).json({ success: false, message: 'Reward nicht gefunden.' });
     }
-    const reward = rewardResult.rows[0];
+    const reward = rewardRows2[0];
 
     // Business-E-Mail im QR muss zur DB passen
     if (reward.business_email !== business_email) {
@@ -446,11 +462,6 @@ router.post('/coupon/redeem-qr', redeemLimiter, requireJwt, async (req, res, nex
         [customerEmail, business_email, reward.points_cost, reward_id, nonce]
       );
 
-      await client.query(
-        'UPDATE business_rewards SET redeemed = redeemed + 1 WHERE id = $1',
-        [reward_id]
-      );
-
       await client.query('COMMIT');
     } catch (err) {
       await client.query('ROLLBACK');
@@ -458,6 +469,16 @@ router.post('/coupon/redeem-qr', redeemLimiter, requireJwt, async (req, res, nex
     } finally {
       client.release();
     }
+
+    // redeemed-Zähler in Supabase inkrementieren (fire-and-forget)
+    fetch(
+      `${config.supabaseUrl}/rest/v1/rpc/increment_redeemed`,
+      {
+        method: 'POST',
+        headers: { ...sbHdrs, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reward_uuid: reward_id }),
+      }
+    ).catch(() => {});
 
     res.json({
       success:            true,

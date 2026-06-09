@@ -29,4 +29,8 @@ module.exports = {
   qrSecret: required('QR_SECRET'),            // HMAC-Schlüssel für QR-Signaturen
   qrTtlSeconds: 15 * 60,                       // Punkte-QR läuft nach 15 Minuten ab
   couponQrTtlSeconds: 10 * 60,                 // Coupon-QR läuft nach 10 Minuten ab
+
+  // Supabase (für business_rewards-Zugriff serverseitig)
+  supabaseUrl: required('SUPABASE_URL'),
+  supabaseServiceKey: required('SUPABASE_SERVICE_KEY'),
 };
