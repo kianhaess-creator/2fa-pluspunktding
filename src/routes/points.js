@@ -92,15 +92,6 @@ router.post('/points/generate-qr', generateLimiter, requireJwt, async (req, res,
     // Business-E-Mail ermitteln (Employee kennt seine business_email aus dem JWT)
     const businessEmail = user.type === 'employee' ? user.business_email : user.email;
 
-    // Prüfen ob das Unternehmen in der DB existiert
-    const bizResult = await pool.query(
-      'SELECT email FROM businesses WHERE email = $1',
-      [businessEmail]
-    );
-    if (!bizResult.rows.length) {
-      return res.status(404).json({ success: false, message: 'Unternehmen nicht gefunden.' });
-    }
-
     const now       = Math.floor(Date.now() / 1000);
     const expiresAt = now + config.qrTtlSeconds;
     const nonce     = generateNonce();
@@ -211,16 +202,7 @@ router.post('/points/redeem-qr', redeemLimiter, requireJwt, async (req, res, nex
     // Token sofort löschen (Einmalverwendung)
     await pool.query('DELETE FROM qr_tokens WHERE token = $1', [nonce]);
 
-    // 4. Business existiert prüfen
-    const bizResult = await pool.query(
-      'SELECT email FROM businesses WHERE email = $1',
-      [business_email]
-    );
-    if (!bizResult.rows.length) {
-      return res.status(400).json({ success: false, message: 'Unternehmen nicht gefunden.' });
-    }
-
-    // 5. Punkte atomar gutschreiben (upsert)
+    // 4. Punkte atomar gutschreiben (upsert)
     const upsert = await pool.query(
       `INSERT INTO user_business_points (user_email, business_email, points, updated_at)
        VALUES ($1, $2, $3, NOW())
