@@ -15,6 +15,31 @@ const MAX_EMAIL_LEN    = 254;  // RFC 5321
 const MAX_PASSWORD_LEN = 72;   // bcrypt verarbeitet max. 72 Bytes
 const MAX_NAME_LEN     = 100;
 
+const DISPOSABLE_DOMAINS = new Set([
+  'mailinator.com','guerrillamail.com','guerrillamail.net','guerrillamail.org',
+  'guerrillamail.de','guerrillamail.info','guerrillamailblock.com','grr.la',
+  'tempmail.com','temp-mail.org','temp-mail.io','throwam.com','throwam.net',
+  'throwam.org','dispostable.com','mailnull.com','spamgourmet.com','trashmail.com',
+  'trashmail.me','trashmail.net','trashmail.at','trashmail.io','trashmail.org',
+  'yopmail.com','yopmail.fr','cool.fr.nf','jetable.fr.nf','nospam.ze.tc',
+  'nomail.xl.cx','mega.zik.dj','speed.1s.fr','courriel.fr.nf','moncourrier.fr.nf',
+  'monemail.fr.nf','monmail.fr.nf','sharklasers.com','guerrillamail.biz',
+  'spam4.me','maildrop.cc','discard.email','spamhereplease.com','spamhereplease.net',
+  'fakeinbox.com','mailnesia.com','mailnull.com','spamfree24.org','spamfree24.de',
+  'spamfree24.eu','spamfree24.info','spamfree24.net','spamgob.com','spamgob.net',
+  'tempr.email','dispostable.com','getnada.com','filzmail.com','owlpic.com',
+  'tempinbox.com','spamgourmet.net','spamgourmet.org','throwam.com','mailtemp.net',
+  'tempm.com','tempm.net','nwytg.net','spamotron.com','spamotron.net',
+  'emailondeck.com','crazymailing.com','mintemail.com','10minutemail.com',
+  '10minutemail.net','10minutemail.org','10minutemail.de','10minemail.com',
+  'mohmal.com','deadaddress.com','spamevader.net','spamevader.com',
+]);
+
+function isDisposableEmail(email) {
+  const domain = email.split('@')[1]?.toLowerCase();
+  return domain ? DISPOSABLE_DOMAINS.has(domain) : false;
+}
+
 function validEmail(e) {
   return e && typeof e === 'string' && e.includes('@') && e.length <= MAX_EMAIL_LEN;
 }
@@ -39,6 +64,9 @@ router.post('/send-code', async (req, res, next) => {
 
     if (!validEmail(email)) {
       return res.status(400).json({ error: 'Valid email required' });
+    }
+    if (isDisposableEmail(email)) {
+      return res.status(400).json({ error: 'disposable_email' });
     }
 
     const sendKey = storeKey('sends', email);
@@ -127,6 +155,9 @@ router.post('/auth/register', async (req, res, next) => {
     const { email, password, name, postalCode, city, birthDate } = req.body;
     if (!validEmail(email) || !validPassword(password)) {
       return res.status(400).json({ error: 'invalid_data' });
+    }
+    if (isDisposableEmail(email)) {
+      return res.status(400).json({ error: 'disposable_email' });
     }
     const normalized = email.toLowerCase().trim();
     const safeName = name ? String(name).slice(0, MAX_NAME_LEN) : null;
