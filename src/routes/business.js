@@ -13,6 +13,16 @@ const SALT_ROUNDS = 12;
 // Echter bcrypt-Hash eines zufälligen Strings — verhindert Timing-Angriffe bei unbekannten E-Mails
 const DUMMY_HASH = '$2a$12$LkKe8dqmRB3C5YRQshFxCOizOCrNfOaV/1cjhUxE.XFV7JeNQbHQi';
 
+const MAX_EMAIL_LEN    = 254;
+const MAX_PASSWORD_LEN = 72;
+
+function validEmail(e) {
+  return e && typeof e === 'string' && e.includes('@') && e.length <= MAX_EMAIL_LEN;
+}
+function validPassword(p) {
+  return p && typeof p === 'string' && p.length >= 6 && p.length <= MAX_PASSWORD_LEN;
+}
+
 const loginLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 10,
@@ -64,7 +74,7 @@ function verifyToken(req) {
 router.post('/auth/business/login', loginLimiter, async (req, res, next) => {
   try {
     const { email, password } = req.body;
-    if (!email || !password) return res.json({ success: false, message: 'Ungültige Zugangsdaten' });
+    if (!validEmail(email) || !validPassword(password)) return res.json({ success: false, message: 'Ungültige Zugangsdaten' });
 
     const normalized = email.toLowerCase().trim();
     const result = await pool.query(
@@ -132,7 +142,7 @@ router.post('/auth/business/verify-2fa', codeLimiter, async (req, res, next) => 
 router.post('/auth/employee/login', loginLimiter, async (req, res, next) => {
   try {
     const { email, password } = req.body;
-    if (!email || !password) return res.json({ success: false, message: 'Ungültige Zugangsdaten' });
+    if (!validEmail(email) || !validPassword(password)) return res.json({ success: false, message: 'Ungültige Zugangsdaten' });
 
     const normalized = email.toLowerCase().trim();
     const result = await pool.query(

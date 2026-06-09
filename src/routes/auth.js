@@ -11,6 +11,17 @@ const requireJwt = require('../middleware/jwt');
 
 const SALT_ROUNDS = 12;
 
+const MAX_EMAIL_LEN    = 254;  // RFC 5321
+const MAX_PASSWORD_LEN = 72;   // bcrypt verarbeitet max. 72 Bytes
+const MAX_NAME_LEN     = 100;
+
+function validEmail(e) {
+  return e && typeof e === 'string' && e.includes('@') && e.length <= MAX_EMAIL_LEN;
+}
+function validPassword(p) {
+  return p && typeof p === 'string' && p.length >= 6 && p.length <= MAX_PASSWORD_LEN;
+}
+
 function hashCode(code) {
   return crypto
     .createHmac('sha256', config.hashPepper)
@@ -26,7 +37,7 @@ router.post('/send-code', async (req, res, next) => {
   try {
     const { email, name } = req.body;
 
-    if (!email || typeof email !== 'string' || !email.includes('@')) {
+    if (!validEmail(email)) {
       return res.status(400).json({ error: 'Valid email required' });
     }
 
@@ -114,18 +125,18 @@ router.post('/verify-code', async (req, res, next) => {
 router.post('/auth/register', async (req, res, next) => {
   try {
     const { email, password, name, postalCode, city, birthDate } = req.body;
-    if (!email || typeof email !== 'string' || !email.includes('@') ||
-        !password || typeof password !== 'string' || password.length < 6) {
+    if (!validEmail(email) || !validPassword(password)) {
       return res.status(400).json({ error: 'invalid_data' });
     }
     const normalized = email.toLowerCase().trim();
+    const safeName = name ? String(name).slice(0, MAX_NAME_LEN) : null;
     const existing = await pool.query('SELECT email FROM users WHERE email = $1', [normalized]);
     if (existing.rows.length > 0) return res.status(409).json({ error: 'email_taken' });
     const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
     await pool.query(
       `INSERT INTO users (email, password_hash, name, postal_code, city, birth_date)
        VALUES ($1, $2, $3, $4, $5, $6)`,
-      [normalized, passwordHash, name || null, postalCode || null, city || null, birthDate || null]
+      [normalized, passwordHash, safeName, postalCode || null, city || null, birthDate || null]
     );
     res.json({ success: true });
   } catch (err) { next(err); }
@@ -134,7 +145,7 @@ router.post('/auth/register', async (req, res, next) => {
 router.post('/auth/login', async (req, res, next) => {
   try {
     const { email, password } = req.body;
-    if (!email || typeof email !== 'string' || !password || typeof password !== 'string') {
+    if (!validEmail(email) || !validPassword(password)) {
       return res.status(200).json({ success: false });
     }
     const normalized = email.toLowerCase().trim();
@@ -222,8 +233,7 @@ router.post('/auth/refresh', requireJwt, async (req, res, next) => {
 router.post('/auth/reset-password', async (req, res, next) => {
   try {
     const { email, newPassword } = req.body;
-    if (!email || typeof email !== 'string' || !email.includes('@') ||
-        !newPassword || typeof newPassword !== 'string' || newPassword.length < 6) {
+    if (!validEmail(email) || !validPassword(newPassword)) {
       return res.status(400).json({ error: 'invalid_data' });
     }
     const normalized = email.toLowerCase().trim();
