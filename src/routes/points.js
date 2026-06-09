@@ -259,14 +259,17 @@ router.post('/coupon/generate-qr', redeemLimiter, requireJwt, async (req, res, n
       Authorization: `Bearer ${config.supabaseServiceKey}`,
       'Content-Type': 'application/json',
     };
-    const rewardResp = await fetch(
-      `${config.supabaseUrl}/rest/v1/business_rewards?id=eq.${encodeURIComponent(reward_id)}&select=id,business_email,points_cost,title,status&limit=1`,
-      { headers: sbHeaders }
-    );
+    const rewardUrl = `${config.supabaseUrl}/rest/v1/business_rewards?id=eq.${encodeURIComponent(reward_id)}&select=id,business_email,points_cost,title,status&limit=1`;
+    console.log('[coupon/generate-qr] fetching reward:', rewardUrl);
+    const rewardResp = await fetch(rewardUrl, { headers: sbHeaders });
+    console.log('[coupon/generate-qr] supabase status:', rewardResp.status);
     if (!rewardResp.ok) {
-      return res.status(500).json({ success: false, message: 'Fehler beim Laden des Rewards.' });
+      const errText = await rewardResp.text();
+      console.error('[coupon/generate-qr] supabase error:', errText);
+      return res.status(500).json({ success: false, message: 'Fehler beim Laden des Rewards: ' + errText.slice(0, 100) });
     }
     const rewardRows = await rewardResp.json();
+    console.log('[coupon/generate-qr] rows found:', rewardRows.length);
     if (!rewardRows.length) {
       return res.status(404).json({ success: false, message: 'Coupon nicht gefunden.' });
     }
