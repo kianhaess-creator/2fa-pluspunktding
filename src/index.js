@@ -10,6 +10,8 @@ const { init, pool } = require('./services/db');
 
 const app = express();
 
+app.set('trust proxy', 1);
+
 app.use(cors({
   origin: config.allowedOrigins.length > 0 ? config.allowedOrigins : false,
   methods: ['GET', 'POST'],
