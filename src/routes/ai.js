@@ -72,7 +72,7 @@ router.post('/ai-chat', aiLimiter, async (req, res) => {
     if (!groqRes.ok) {
       const err = await groqRes.text();
       console.error('[AI] Groq error:', err);
-      return res.status(502).json({ error: 'KI-Service vorübergehend nicht verfügbar.' });
+      return res.status(502).json({ error: 'KI-Service vorübergehend nicht verfügbar.', debug: err });
     }
 
     const data = await groqRes.json();
