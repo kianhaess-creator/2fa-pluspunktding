@@ -1,12 +1,13 @@
-const express = require('express');
-const crypto = require('crypto');
-const bcrypt = require('bcryptjs');
-const jwt = require('jsonwebtoken');
-const router = express.Router();
-const config = require('../config');
-const store = require('../services/store');
+const express    = require('express');
+const crypto     = require('crypto');
+const bcrypt     = require('bcryptjs');
+const jwt        = require('jsonwebtoken');
+const rateLimit  = require('express-rate-limit');
+const router     = express.Router();
+const config     = require('../config');
+const store      = require('../services/store');
 const { sendVerificationEmail } = require('../services/email');
-const { pool } = require('../services/db');
+const { pool }   = require('../services/db');
 const requireJwt = require('../middleware/jwt');
 
 const SALT_ROUNDS = 12;
@@ -258,6 +259,64 @@ router.post('/auth/refresh', requireJwt, async (req, res, next) => {
       { expiresIn: config.jwtExpiresIn }
     );
     res.json({ success: true, token });
+  } catch (err) { next(err); }
+});
+
+// ─── POST /api/reviews ────────────────────────────────────────────────────────
+// Kunden können Bewertungen abgeben. Rate-Limit: 1 Review pro Business pro Stunde.
+const reviewRateLimit = rateLimit({
+  windowMs: 60 * 60 * 1000, max: 5,
+  standardHeaders: true, legacyHeaders: false,
+  message: { success: false, message: 'Zu viele Bewertungen. Bitte warte eine Stunde.' },
+});
+
+router.post('/reviews', reviewRateLimit, requireJwt, async (req, res, next) => {
+  try {
+    const user = req.user;
+    if (user.type !== 'customer') {
+      return res.status(403).json({ success: false, message: 'Nur Kunden können Bewertungen abgeben.' });
+    }
+
+    const { business_email, user_name, rating, comment } = req.body;
+
+    if (!business_email || typeof business_email !== 'string') {
+      return res.status(400).json({ success: false, message: 'business_email fehlt.' });
+    }
+    const ratingNum = parseInt(rating, 10);
+    if (!ratingNum || ratingNum < 1 || ratingNum > 5) {
+      return res.status(400).json({ success: false, message: 'Rating muss zwischen 1 und 5 liegen.' });
+    }
+    const safeName    = String(user_name  || 'Anonym').slice(0, 100);
+    const safeComment = String(comment    || '').slice(0, 1000);
+
+    if (!config.supabaseUrl || !config.supabaseServiceKey) {
+      return res.status(503).json({ success: false, message: 'Server-Konfiguration unvollständig.' });
+    }
+
+    const sbH = {
+      apikey: config.supabaseServiceKey,
+      Authorization: `Bearer ${config.supabaseServiceKey}`,
+      'Content-Type': 'application/json',
+      Prefer: 'return=minimal',
+    };
+    const resp = await fetch(`${config.supabaseUrl}/rest/v1/reviews`, {
+      method: 'POST',
+      headers: sbH,
+      body: JSON.stringify({
+        business_email,
+        user_name: safeName,
+        rating: ratingNum,
+        comment: safeComment,
+      }),
+    });
+
+    if (!resp.ok) {
+      const errText = await resp.text().catch(() => '');
+      console.error('[POST /reviews] Supabase-Fehler:', resp.status, errText);
+      return res.status(500).json({ success: false, message: 'Bewertung konnte nicht gespeichert werden.' });
+    }
+
+    res.json({ success: true });
   } catch (err) { next(err); }
 });
 
