@@ -502,15 +502,50 @@ router.post('/coupon/redeem-qr', redeemLimiter, requireJwt, async (req, res, nex
       client.release();
     }
 
-    // redeemed-Zähler in Supabase inkrementieren (fire-and-forget)
-    fetch(
-      `${config.supabaseUrl}/rest/v1/rpc/increment_redeemed`,
-      {
-        method: 'POST',
-        headers: { ...sbHdrs, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ reward_uuid: reward_id }),
-      }
-    ).catch(() => {});
+    // redeemed-Zähler inkrementieren + ggf. status auf inactive setzen (fire-and-forget)
+    (async () => {
+      try {
+        // 1. redeemed hochzählen und aktuellen Stand zurückbekommen
+        const updResp = await fetch(
+          `${config.supabaseUrl}/rest/v1/business_rewards?id=eq.${encodeURIComponent(reward_id)}`,
+          {
+            method: 'PATCH',
+            headers: { ...sbHdrs, 'Content-Type': 'application/json', Prefer: 'return=representation' },
+            body: JSON.stringify({ redeemed: reward.points_cost }),  // wird per DB-Trigger / RPC ersetzt
+          }
+        );
+        // Stattdessen RPC nutzen (wie bisher) dann danach stock/redeemed prüfen
+        await fetch(
+          `${config.supabaseUrl}/rest/v1/rpc/increment_redeemed`,
+          {
+            method: 'POST',
+            headers: { ...sbHdrs, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ reward_uuid: reward_id }),
+          }
+        );
+
+        // 2. Aktuellen Stand laden
+        const checkResp = await fetch(
+          `${config.supabaseUrl}/rest/v1/business_rewards?id=eq.${encodeURIComponent(reward_id)}&select=stock,redeemed,status&limit=1`,
+          { headers: sbHdrs }
+        );
+        if (!checkResp.ok) return;
+        const [row] = await checkResp.json();
+        if (!row) return;
+
+        // 3. Wenn alle Einlösungen verbraucht → status auf inactive setzen
+        if (row.status === 'active' && row.stock > 0 && row.redeemed >= row.stock) {
+          await fetch(
+            `${config.supabaseUrl}/rest/v1/business_rewards?id=eq.${encodeURIComponent(reward_id)}`,
+            {
+              method: 'PATCH',
+              headers: { ...sbHdrs, 'Content-Type': 'application/json', Prefer: 'return=minimal' },
+              body: JSON.stringify({ status: 'inactive' }),
+            }
+          );
+        }
+      } catch (_) {}
+    })();
 
     res.json({
       success:            true,

@@ -297,13 +297,14 @@ router.post('/reviews', reviewRateLimit, requireJwt, async (req, res, next) => {
       apikey: config.supabaseServiceKey,
       Authorization: `Bearer ${config.supabaseServiceKey}`,
       'Content-Type': 'application/json',
-      Prefer: 'return=minimal',
+      Prefer: 'return=representation',
     };
     const resp = await fetch(`${config.supabaseUrl}/rest/v1/reviews`, {
       method: 'POST',
       headers: sbH,
       body: JSON.stringify({
         business_email,
+        user_email: user.email,
         user_name: safeName,
         rating: ratingNum,
         comment: safeComment,
@@ -314,6 +315,54 @@ router.post('/reviews', reviewRateLimit, requireJwt, async (req, res, next) => {
       const errText = await resp.text().catch(() => '');
       console.error('[POST /reviews] Supabase-Fehler:', resp.status, errText);
       return res.status(500).json({ success: false, message: 'Bewertung konnte nicht gespeichert werden.' });
+    }
+
+    const [created] = await resp.json().catch(() => [{}]);
+    res.json({ success: true, review_id: created?.id || null });
+  } catch (err) { next(err); }
+});
+
+// ─── DELETE /api/reviews/:id ──────────────────────────────────────────────────
+// Kunden können nur ihre eigenen Bewertungen löschen.
+router.delete('/reviews/:id', requireJwt, async (req, res, next) => {
+  try {
+    const user = req.user;
+    if (user.type !== 'customer') {
+      return res.status(403).json({ success: false, message: 'Nur Kunden können Bewertungen löschen.' });
+    }
+
+    const reviewId = req.params.id;
+    if (!reviewId || typeof reviewId !== 'string') {
+      return res.status(400).json({ success: false, message: 'Review-ID fehlt.' });
+    }
+
+    const sbH = {
+      apikey: config.supabaseServiceKey,
+      Authorization: `Bearer ${config.supabaseServiceKey}`,
+      'Content-Type': 'application/json',
+      Prefer: 'return=minimal',
+    };
+
+    // Sicherstellen dass der Review dem eingeloggten User gehört
+    const checkResp = await fetch(
+      `${config.supabaseUrl}/rest/v1/reviews?id=eq.${encodeURIComponent(reviewId)}&select=id,user_email&limit=1`,
+      { headers: sbH }
+    );
+    if (!checkResp.ok) return res.status(500).json({ success: false, message: 'Fehler beim Laden der Bewertung.' });
+    const [row] = await checkResp.json();
+    if (!row) return res.status(404).json({ success: false, message: 'Bewertung nicht gefunden.' });
+    if (row.user_email !== user.email) {
+      return res.status(403).json({ success: false, message: 'Keine Berechtigung.' });
+    }
+
+    const delResp = await fetch(
+      `${config.supabaseUrl}/rest/v1/reviews?id=eq.${encodeURIComponent(reviewId)}`,
+      { method: 'DELETE', headers: sbH }
+    );
+    if (!delResp.ok) {
+      const errText = await delResp.text().catch(() => '');
+      console.error('[DELETE /reviews] Supabase-Fehler:', delResp.status, errText);
+      return res.status(500).json({ success: false, message: 'Löschen fehlgeschlagen.' });
     }
 
     res.json({ success: true });
