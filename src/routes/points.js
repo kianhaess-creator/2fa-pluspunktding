@@ -505,16 +505,7 @@ router.post('/coupon/redeem-qr', redeemLimiter, requireJwt, async (req, res, nex
     // redeemed-Zähler inkrementieren + ggf. status auf inactive setzen (fire-and-forget)
     (async () => {
       try {
-        // 1. redeemed hochzählen und aktuellen Stand zurückbekommen
-        const updResp = await fetch(
-          `${config.supabaseUrl}/rest/v1/business_rewards?id=eq.${encodeURIComponent(reward_id)}`,
-          {
-            method: 'PATCH',
-            headers: { ...sbHdrs, 'Content-Type': 'application/json', Prefer: 'return=representation' },
-            body: JSON.stringify({ redeemed: reward.points_cost }),  // wird per DB-Trigger / RPC ersetzt
-          }
-        );
-        // Stattdessen RPC nutzen (wie bisher) dann danach stock/redeemed prüfen
+        // 1. redeemed-Zähler via RPC inkrementieren
         await fetch(
           `${config.supabaseUrl}/rest/v1/rpc/increment_redeemed`,
           {
