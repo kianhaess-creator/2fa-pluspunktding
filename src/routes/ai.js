@@ -44,41 +44,33 @@ router.post('/ai-chat', aiLimiter, async (req, res) => {
 
     const systemPrompt = SYSTEM_PROMPTS[role] || SYSTEM_PROMPTS.user;
 
-    const messages = [{ role: 'user', content: message }];
-
-    // Optional context from dashboard data
     let fullSystem = systemPrompt;
     if (context && typeof context === 'object') {
       fullSystem += '\n\nAktuelle Dashboard-Daten:\n' + JSON.stringify(context, null, 2).slice(0, 3000);
     }
 
-    const groqRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    const apiKey = process.env.GEMINI_API_KEY;
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+
+    const geminiRes = await fetch(url, {
       method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: 'llama-3.3-70b-versatile',
-        messages: [
-          { role: 'system', content: fullSystem },
-          ...messages,
-        ],
-        max_tokens: 1024,
-        temperature: 0.7,
+        system_instruction: { parts: [{ text: fullSystem }] },
+        contents: [{ role: 'user', parts: [{ text: message }] }],
+        generationConfig: { maxOutputTokens: 1024, temperature: 0.7 },
       }),
     });
 
-    if (!groqRes.ok) {
-      const err = await groqRes.text();
-      console.error('[AI] Groq error status:', groqRes.status);
-      console.error('[AI] Groq error body:', err);
-      console.error('[AI] API Key set:', !!process.env.GROQ_API_KEY);
-      return res.status(502).json({ error: 'KI-Service vorübergehend nicht verfügbar.', status: groqRes.status, debug: err });
+    if (!geminiRes.ok) {
+      const err = await geminiRes.text();
+      console.error('[AI] Gemini error status:', geminiRes.status);
+      console.error('[AI] Gemini error body:', err);
+      return res.status(502).json({ error: 'KI-Service vorübergehend nicht verfügbar.' });
     }
 
-    const data = await groqRes.json();
-    const reply = data.choices?.[0]?.message?.content || 'Keine Antwort erhalten.';
+    const data = await geminiRes.json();
+    const reply = data.candidates?.[0]?.content?.parts?.[0]?.text || 'Keine Antwort erhalten.';
 
     res.json({ reply });
   } catch (err) {
