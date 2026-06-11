@@ -323,12 +323,12 @@ router.post('/reviews', reviewRateLimit, requireJwt, async (req, res, next) => {
 });
 
 // ─── DELETE /api/reviews/:id ──────────────────────────────────────────────────
-// Kunden können nur ihre eigenen Bewertungen löschen.
+// Kunden löschen ihre eigene Bewertung; Unternehmen löschen Bewertungen ihres Profils.
 router.delete('/reviews/:id', requireJwt, async (req, res, next) => {
   try {
     const user = req.user;
-    if (user.type !== 'customer') {
-      return res.status(403).json({ success: false, message: 'Nur Kunden können Bewertungen löschen.' });
+    if (user.type !== 'customer' && user.type !== 'business') {
+      return res.status(403).json({ success: false, message: 'Keine Berechtigung.' });
     }
 
     const reviewId = req.params.id;
@@ -343,15 +343,19 @@ router.delete('/reviews/:id', requireJwt, async (req, res, next) => {
       Prefer: 'return=minimal',
     };
 
-    // Sicherstellen dass der Review dem eingeloggten User gehört
     const checkResp = await fetch(
-      `${config.supabaseUrl}/rest/v1/reviews?id=eq.${encodeURIComponent(reviewId)}&select=id,user_email&limit=1`,
+      `${config.supabaseUrl}/rest/v1/reviews?id=eq.${encodeURIComponent(reviewId)}&select=id,user_email,business_email&limit=1`,
       { headers: sbH }
     );
     if (!checkResp.ok) return res.status(500).json({ success: false, message: 'Fehler beim Laden der Bewertung.' });
     const [row] = await checkResp.json();
     if (!row) return res.status(404).json({ success: false, message: 'Bewertung nicht gefunden.' });
-    if (row.user_email !== user.email) {
+
+    // Kunde darf nur eigene, Unternehmen nur Bewertungen auf ihr Profil löschen
+    if (user.type === 'customer' && row.user_email !== user.email) {
+      return res.status(403).json({ success: false, message: 'Keine Berechtigung.' });
+    }
+    if (user.type === 'business' && row.business_email !== user.email) {
       return res.status(403).json({ success: false, message: 'Keine Berechtigung.' });
     }
 
