@@ -69,6 +69,21 @@ init()
         console.error('[QR Cleanup] Fehler:', err.message);
       }
     }, 5 * 60 * 1000);
+
+    // Punkte-Verlauf älter als 30 Tage löschen (täglich)
+    async function cleanupOldTransactions() {
+      try {
+        const r = await pool.query(
+          "DELETE FROM point_transactions WHERE created_at < NOW() - INTERVAL '30 days'"
+        );
+        if (r.rowCount > 0) console.log(`[History Cleanup] ${r.rowCount} Transaktionen älter als 30 Tage gelöscht.`);
+      } catch (err) {
+        console.error('[History Cleanup] Fehler:', err.message);
+      }
+    }
+
+    cleanupOldTransactions();
+    setInterval(cleanupOldTransactions, 24 * 60 * 60 * 1000);
   })
   .catch((err) => {
     console.error('DB init failed:', err.message);
