@@ -86,15 +86,50 @@ router.get('/admin/users', requireAdmin, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-// GET /api/admin/activity — Letzte 20 Aktivitäten
+// GET /api/admin/activity — Letzte Aktivitäten (limit via query param)
 router.get('/admin/activity', requireAdmin, async (req, res, next) => {
   try {
+    const limit = Math.min(parseInt(req.query.limit) || 20, 500);
     const result = await pool.query(`
       SELECT user_email, business_email, points, type, created_at
       FROM point_transactions
-      ORDER BY created_at DESC LIMIT 20
-    `);
+      ORDER BY created_at DESC LIMIT $1
+    `, [limit]);
     res.json({ success: true, activity: result.rows });
+  } catch (err) { next(err); }
+});
+
+// GET /api/admin/tokens — Aktive QR- und Coupon-Tokens
+router.get('/admin/tokens', requireAdmin, async (req, res, next) => {
+  try {
+    const [qr, coupon] = await Promise.all([
+      pool.query(`
+        SELECT token, business_email, points, expires_at, created_at
+        FROM qr_tokens
+        WHERE expires_at > NOW()
+        ORDER BY expires_at ASC
+      `),
+      pool.query(`
+        SELECT nonce AS token, business_email, reward_id, expires_at, created_at
+        FROM coupon_tokens
+        WHERE expires_at > NOW()
+        ORDER BY expires_at ASC
+      `),
+    ]);
+    res.json({ success: true, qr_tokens: qr.rows, coupon_tokens: coupon.rows });
+  } catch (err) { next(err); }
+});
+
+// GET /api/admin/points — Punkte-Rangliste
+router.get('/admin/points', requireAdmin, async (req, res, next) => {
+  try {
+    const result = await pool.query(`
+      SELECT user_email, business_email, points, updated_at
+      FROM user_business_points
+      ORDER BY points DESC
+      LIMIT 500
+    `);
+    res.json({ success: true, points: result.rows });
   } catch (err) { next(err); }
 });
 
