@@ -133,6 +133,22 @@ router.get('/admin/points', requireAdmin, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// POST /api/admin/notify — Benachrichtigung an Nutzer/Unternehmen senden
+router.post('/admin/notify', requireAdmin, async (req, res, next) => {
+  try {
+    const { recipient_email, recipient_type, type, title, message, reason } = req.body;
+    if (!recipient_email || !recipient_type || !type || !title || !message) {
+      return res.status(400).json({ error: 'Missing required fields' });
+    }
+    await pool.query(
+      `INSERT INTO notifications (recipient_email, recipient_type, type, title, message, reason)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [recipient_email, recipient_type, type, title, message, reason || null]
+    );
+    res.json({ success: true });
+  } catch (err) { next(err); }
+});
+
 // GET /api/admin/notifications — alle Notifications (Admin-Übersicht)
 router.get('/admin/notifications', requireAdmin, async (req, res, next) => {
   try {

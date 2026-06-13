@@ -108,6 +108,24 @@ async function init() {
   `);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_ct_business_email ON coupon_tokens (business_email)`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_ct_expires_at     ON coupon_tokens (expires_at)`);
+
+  // ── notifications ─────────────────────────────────────────────────────────
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS notifications (
+      id             uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+      recipient_email TEXT       NOT NULL,
+      recipient_type  TEXT       NOT NULL CHECK (recipient_type IN ('customer', 'business', 'employee')),
+      type            TEXT       NOT NULL,
+      title           TEXT       NOT NULL,
+      message         TEXT       NOT NULL,
+      reason          TEXT,
+      read            BOOLEAN    DEFAULT FALSE,
+      created_at      TIMESTAMPTZ DEFAULT NOW(),
+      expires_at      TIMESTAMPTZ DEFAULT NOW() + INTERVAL '7 days'
+    )
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_notif_recipient ON notifications (recipient_email, created_at DESC)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_notif_expires   ON notifications (expires_at)`);
 }
 
 module.exports = { pool, init };
