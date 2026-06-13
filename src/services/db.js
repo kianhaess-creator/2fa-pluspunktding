@@ -73,9 +73,11 @@ async function init() {
     )
   `);
 
+  await pool.query(`ALTER TABLE point_transactions ADD COLUMN IF NOT EXISTS employee_id uuid`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_pt_user_email     ON point_transactions (user_email)`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_pt_business_email ON point_transactions (business_email)`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_pt_nonce          ON point_transactions (nonce)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_pt_employee_id    ON point_transactions (employee_id)`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_ubp_user_email    ON user_business_points (user_email)`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_ubp_business_email ON user_business_points (business_email)`);
 
@@ -91,6 +93,7 @@ async function init() {
       created_at     TIMESTAMPTZ DEFAULT NOW()
     )
   `);
+  await pool.query(`ALTER TABLE qr_tokens ADD COLUMN IF NOT EXISTS employee_id uuid`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_qrt_business_email ON qr_tokens (business_email)`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_qrt_expires_at     ON qr_tokens (expires_at)`);
 

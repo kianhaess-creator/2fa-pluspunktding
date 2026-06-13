@@ -123,12 +123,13 @@ router.post('/points/generate-qr', generateLimiter, requireJwt, async (req, res,
     const full      = { ...payloadData, s: sig };
     const qrPayload = Buffer.from(JSON.stringify(full)).toString('base64url');
 
-    // Token in Supabase persistieren (Token=nonce, Betrag, Shop-ID, Ablaufzeit)
+    const employeeId = user.type === 'employee' ? (user.employee_id || null) : null;
+
     await pool.query(
-      `INSERT INTO qr_tokens (token, business_email, points, expires_at)
-       VALUES ($1, $2, $3, TO_TIMESTAMP($4))
+      `INSERT INTO qr_tokens (token, business_email, points, expires_at, employee_id)
+       VALUES ($1, $2, $3, TO_TIMESTAMP($4), $5)
        ON CONFLICT (token) DO NOTHING`,
-      [nonce, businessEmail, points, expiresAt]
+      [nonce, businessEmail, points, expiresAt, employeeId]
     );
 
     res.json({ success: true, qr_payload: qrPayload, points, expires_in: config.qrTtlSeconds });
@@ -192,9 +193,9 @@ router.post('/points/redeem-qr', redeemLimiter, requireJwt, async (req, res, nex
       return res.status(400).json({ success: false, message: 'QR-Code wurde bereits verwendet.' });
     }
 
-    // 3b. Supabase-Validierung: Token muss existieren, Betrag + Shop müssen übereinstimmen
+    // 3b. Token validieren — enthält auch employee_id des QR-Erstellers
     const tokenRow = await pool.query(
-      `SELECT token, business_email, points, expires_at
+      `SELECT token, business_email, points, expires_at, employee_id
        FROM   qr_tokens
        WHERE  token = $1`,
       [nonce]
@@ -231,12 +232,12 @@ router.post('/points/redeem-qr', redeemLimiter, requireJwt, async (req, res, nex
     );
     const totalPoints = upsert.rows[0].points;
 
-    // 6. Transaktion loggen
+    // 6. Transaktion loggen (employee_id des QR-Erstellers aus Token)
     await pool.query(
       `INSERT INTO point_transactions
-         (user_email, business_email, points, type, nonce, created_at)
-       VALUES ($1, $2, $3, 'earn', $4, NOW())`,
-      [user.email, business_email, points, nonce]
+         (user_email, business_email, points, type, nonce, employee_id, created_at)
+       VALUES ($1, $2, $3, 'earn', $4, $5, NOW())`,
+      [user.email, business_email, points, nonce, dbToken.employee_id || null]
     );
 
     res.json({
@@ -487,11 +488,12 @@ router.post('/coupon/redeem-qr', redeemLimiter, requireJwt, async (req, res, nex
       );
       remainingPoints = updateResult.rows[0]?.points ?? 0;
 
+      const redeemEmployeeId = user.type === 'employee' ? (user.employee_id || null) : null;
       await client.query(
         `INSERT INTO point_transactions
-           (user_email, business_email, points, type, reward_id, nonce, created_at)
-         VALUES ($1, $2, $3, 'redeem', $4, $5, NOW())`,
-        [customerEmail, business_email, reward.points_cost, reward_id, nonce]
+           (user_email, business_email, points, type, reward_id, nonce, employee_id, created_at)
+         VALUES ($1, $2, $3, 'redeem', $4, $5, $6, NOW())`,
+        [customerEmail, business_email, reward.points_cost, reward_id, nonce, redeemEmployeeId]
       );
 
       await client.query('COMMIT');
@@ -595,10 +597,12 @@ router.get('/points/history', requireJwt, async (req, res, next) => {
     } else {
       const bizEmail = user.type === 'employee' ? user.business_email : user.email;
       const r = await pool.query(
-        `SELECT points, type, created_at, user_email
-         FROM   point_transactions
-         WHERE  business_email = $1
-         ORDER  BY created_at DESC LIMIT 100`,
+        `SELECT pt.points, pt.type, pt.created_at, pt.user_email, pt.employee_id,
+                be.first_name, be.last_name
+         FROM   point_transactions pt
+         LEFT   JOIN business_employees be ON be.id = pt.employee_id
+         WHERE  pt.business_email = $1
+         ORDER  BY pt.created_at DESC LIMIT 200`,
         [bizEmail]
       );
       rows = r.rows;
