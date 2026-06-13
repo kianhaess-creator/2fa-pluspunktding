@@ -337,4 +337,79 @@ router.post('/auth/business/change-password', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// PUT /api/business/employees/:id  — update employee data
+router.put('/business/employees/:id', async (req, res, next) => {
+  try {
+    let user;
+    try { user = verifyToken(req); } catch (e) { return res.status(e.status).json({ error: e.message }); }
+    if (user.type !== 'business') return res.status(403).json({ error: 'Forbidden' });
+
+    const { id } = req.params;
+    const { first_name, last_name, role, workdays, shift_from, shift_to, permissions, photo_url } = req.body;
+
+    const check = await pool.query(
+      'SELECT id FROM business_employees WHERE id = $1 AND business_email = $2',
+      [id, user.email]
+    );
+    if (check.rows.length === 0) return res.status(404).json({ error: 'not_found' });
+
+    const allowed = ['first_name','last_name','role','workdays','shift_from','shift_to'];
+    const setClauses = [];
+    const vals = [];
+    let idx = 1;
+    for (const col of allowed) {
+      if (req.body[col] !== undefined) {
+        setClauses.push(`${col} = $${idx++}`);
+        vals.push(req.body[col] || null);
+      }
+    }
+    if (permissions !== undefined) {
+      setClauses.push(`permissions = $${idx++}`);
+      vals.push(permissions ? JSON.stringify(permissions) : null);
+    }
+    if (photo_url !== undefined && photo_url) {
+      setClauses.push(`photo_url = $${idx++}`);
+      vals.push(photo_url);
+    }
+    if (setClauses.length === 0) return res.status(400).json({ error: 'no_fields' });
+    vals.push(id);
+    await pool.query(`UPDATE business_employees SET ${setClauses.join(', ')} WHERE id = $${idx}`, vals);
+    res.json({ success: true });
+  } catch (err) { next(err); }
+});
+
+// GET /api/business/employees  — list employees for the authenticated business
+router.get('/business/employees', async (req, res, next) => {
+  try {
+    let user;
+    try { user = verifyToken(req); } catch (e) { return res.status(e.status).json({ error: e.message }); }
+    if (user.type !== 'business') return res.status(403).json({ error: 'Forbidden' });
+
+    const result = await pool.query(
+      `SELECT id, email, first_name, last_name, role, workdays, shift_from, shift_to,
+              permissions, photo_url, is_first_login, created_at
+       FROM business_employees
+       WHERE business_email = $1
+       ORDER BY created_at ASC`,
+      [user.email]
+    );
+    res.json({ success: true, employees: result.rows });
+  } catch (err) { next(err); }
+});
+
+// POST /api/auth/employee/complete-first-login  — mark first login as done (email confirmed, no change)
+router.post('/auth/employee/complete-first-login', async (req, res, next) => {
+  try {
+    let user;
+    try { user = verifyToken(req); } catch (e) { return res.status(e.status).json({ error: e.message }); }
+    if (user.type !== 'employee') return res.status(403).json({ error: 'Forbidden' });
+
+    await pool.query(
+      'UPDATE business_employees SET is_first_login = false WHERE id = $1',
+      [user.employee_id]
+    );
+    res.json({ success: true });
+  } catch (err) { next(err); }
+});
+
 module.exports = router;
