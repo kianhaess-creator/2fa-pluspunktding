@@ -133,4 +133,16 @@ router.get('/admin/points', requireAdmin, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// GET /api/admin/notifications — alle Notifications (Admin-Übersicht)
+router.get('/admin/notifications', requireAdmin, async (req, res, next) => {
+  try {
+    const result = await pool.query(`
+      SELECT id, recipient_email, recipient_type, type, title, message, reason, read, created_at, expires_at
+      FROM notifications
+      ORDER BY created_at DESC LIMIT 200
+    `);
+    res.json({ success: true, notifications: result.rows });
+  } catch (err) { next(err); }
+});
+
 module.exports = router;

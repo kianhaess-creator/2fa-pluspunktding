@@ -70,6 +70,18 @@ init()
       }
     }, 5 * 60 * 1000);
 
+    // Abgelaufene Notifications löschen (täglich)
+    async function cleanupOldNotifications() {
+      try {
+        const r = await pool.query("DELETE FROM notifications WHERE expires_at < NOW()");
+        if (r.rowCount > 0) console.log(`[Notif Cleanup] ${r.rowCount} Benachrichtigung(en) gelöscht.`);
+      } catch (err) {
+        console.error('[Notif Cleanup] Fehler:', err.message);
+      }
+    }
+    cleanupOldNotifications();
+    setInterval(cleanupOldNotifications, 24 * 60 * 60 * 1000);
+
     // Punkte-Verlauf älter als 30 Tage löschen (täglich)
     async function cleanupOldTransactions() {
       try {

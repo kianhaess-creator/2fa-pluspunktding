@@ -373,6 +373,41 @@ router.delete('/reviews/:id', requireJwt, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// ─── GET /api/notifications ───────────────────────────────────────────────────
+// Gibt Benachrichtigungen für den eingeloggten User/Business zurück
+router.get('/notifications', requireJwt, async (req, res, next) => {
+  try {
+    const result = await pool.query(
+      `SELECT id, type, title, message, reason, read, created_at
+       FROM notifications
+       WHERE recipient_email = $1 AND expires_at > NOW()
+       ORDER BY created_at DESC LIMIT 50`,
+      [req.user.email]
+    );
+    res.json({ success: true, notifications: result.rows });
+  } catch (err) { next(err); }
+});
+
+// ─── POST /api/notifications/read ─────────────────────────────────────────────
+// Markiert eine oder alle Notifications als gelesen
+router.post('/notifications/read', requireJwt, async (req, res, next) => {
+  try {
+    const { id } = req.body;
+    if (id) {
+      await pool.query(
+        'UPDATE notifications SET read = TRUE WHERE id = $1 AND recipient_email = $2',
+        [id, req.user.email]
+      );
+    } else {
+      await pool.query(
+        'UPDATE notifications SET read = TRUE WHERE recipient_email = $1',
+        [req.user.email]
+      );
+    }
+    res.json({ success: true });
+  } catch (err) { next(err); }
+});
+
 router.post('/auth/reset-password', async (req, res, next) => {
   try {
     const { email, newPassword } = req.body;
